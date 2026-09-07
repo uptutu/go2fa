@@ -2,57 +2,607 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>2fa — TOTP Vault</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 0; }
-  header { padding: 12px 16px; border-bottom: 1px solid #ccc3;
-           display: flex; justify-content: space-between; align-items: center; }
-  header h1 { font-size: 16px; margin: 0; }
-  #status { font-size: 12px; color: #888; }
-  main { padding: 16px; max-width: 900px; }
-  ul#secrets { list-style: none; padding: 0; margin: 0; }
-  ul#secrets li { padding: 8px 12px; border-bottom: 1px solid #ccc1;
-                  display: grid; grid-template-columns: 1fr 130px 60px;
-                  gap: 8px; align-items: center; }
-  ul#secrets li:hover { background: #8881; }
-  .issuer { font-weight: 600; }
-  .account { font-size: 12px; color: #888; }
-  .code { font-family: ui-monospace, Menlo, monospace; font-size: 18px;
-          text-align: center; padding: 4px 8px; border: 1px solid #8884;
-          border-radius: 6px; cursor: pointer; user-select: all; }
-  .bar { height: 4px; background: linear-gradient(to right, #4ade80 var(--pct), #8883 0); }
-  form#add { border: 1px solid #8884; padding: 12px; border-radius: 8px;
-             margin: 12px 0; display: grid; gap: 6px; }
-  form#add input, form#add select { padding: 4px 6px; font: inherit; }
-  form#add button { padding: 6px 14px; font: inherit; }
-  #qr { display: none; margin-top: 8px; }
-  #qr.show { display: block; }
-  video { width: 100%; max-width: 320px; }
+  /* -------- Tokens -------- */
+  :root {
+    color-scheme: dark;
+    --bg: #0b1020;
+    --bg-elev: #131a33;
+    --bg-elev-2: #1a2244;
+    --surface: rgba(255,255,255,0.04);
+    --surface-2: rgba(255,255,255,0.08);
+    --border: rgba(255,255,255,0.10);
+    --border-strong: rgba(255,255,255,0.18);
+    --text: #e7ecf5;
+    --text-dim: #aab3c8;
+    --text-faint: #7d879c;
+    --accent: #7c9cff;
+    --accent-2: #5ec8ff;
+    --good: #4ade80;
+    --warn: #facc15;
+    --danger: #ff6b6b;
+    --code-bg: #0a1226;
+    --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --bg-elev: #ffffff;
+      --bg-elev-2: #fafbff;
+      --surface: rgba(0,0,0,0.03);
+      --surface-2: rgba(0,0,0,0.06);
+      --border: rgba(0,0,0,0.10);
+      --border-strong: rgba(0,0,0,0.18);
+      --text: #161b2b;
+      --text-dim: #4a546b;
+      --text-faint: #6b7589;
+      --code-bg: #ffffff;
+      --shadow: 0 6px 20px rgba(20,30,60,0.10);
+    }
+  }
+
+  /* -------- Base -------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(124,156,255,0.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(94,200,255,0.08), transparent 60%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  input, select, textarea { font: inherit; color: inherit; }
+  ::selection { background: rgba(124,156,255,0.35); }
+  :focus-visible { outline: none; box-shadow: var(--focus); border-radius: 6px; }
+
+  /* -------- Layout -------- */
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    grid-template-rows: 56px 1fr;
+    grid-template-areas:
+      "header header"
+      "side main";
+    min-height: 100vh;
+  }
+  @media (max-width: 720px) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: 56px auto 1fr;
+      grid-template-areas: "header" "side" "main";
+    }
+  }
+  header.top {
+    grid-area: header;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header.top h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  header.top h1 .logo {
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center;
+    color: #0b1020;
+    font-weight: 800;
+    font-size: 12px;
+  }
+  .search {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    min-width: 220px;
+    transition: border-color .15s, background .15s;
+  }
+  .search:focus-within { border-color: var(--border-strong); background: var(--surface-2); }
+  .search input {
+    background: transparent; border: 0; outline: 0;
+    color: var(--text);
+    width: 100%;
+    min-width: 0;
+  }
+  .search input::placeholder { color: var(--text-faint); }
+  .search svg { width: 14px; height: 14px; color: var(--text-faint); flex-shrink: 0; }
+  @media (max-width: 720px) {
+    .search { min-width: 0; flex: 1; }
+  }
+
+  /* status pill */
+  .status {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+  .status.unlocked .dot { background: var(--good); box-shadow: 0 0 0 3px rgba(74,222,128,0.18); }
+  .status.locked .dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(250,204,21,0.18); }
+  .status.error .dot { background: var(--danger); box-shadow: 0 0 0 3px rgba(255,107,107,0.18); }
+  .status .addr { color: var(--text-faint); margin-left: 4px; }
+
+  /* -------- Sidebar -------- */
+  aside.side {
+    grid-area: side;
+    border-right: 1px solid var(--border);
+    background: var(--bg-elev);
+    padding: 16px 12px;
+    overflow: auto;
+  }
+  .group-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+  .group-list li button {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    color: var(--text-dim);
+    display: flex; align-items: center; gap: 10px;
+    transition: background .15s, color .15s;
+  }
+  .group-list li button:hover { background: var(--surface); color: var(--text); }
+  .group-list li button[aria-pressed="true"] {
+    background: var(--surface-2); color: var(--text);
+  }
+  .group-list .swatch {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--text-faint); flex-shrink: 0;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.06);
+  }
+  .group-list .count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-faint);
+    background: var(--surface);
+    padding: 1px 6px; border-radius: 999px;
+  }
+  .group-list li button[aria-pressed="true"] .count { background: rgba(124,156,255,0.18); color: var(--accent); }
+  .side .add-group {
+    margin-top: 8px;
+    width: 100%;
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-dim);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+  }
+  .side .add-group:hover { color: var(--text); border-color: var(--accent); }
+
+  /* -------- Main -------- */
+  main {
+    grid-area: main;
+    padding: 20px;
+    overflow: auto;
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .toolbar .title {
+    font-size: 13px;
+    color: var(--text-faint);
+    margin-right: auto;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    transition: background .15s, border-color .15s, transform .1s;
+  }
+  .btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+  .btn:active { transform: translateY(1px); }
+  .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent;
+    color: #0b1020;
+    font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .btn.danger { color: var(--danger); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  .btn.ghost:hover { color: var(--text); background: var(--surface); }
+
+  /* -------- Secrets list -------- */
+  .secrets {
+    list-style: none;
+    margin: 0; padding: 0;
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  .secret {
+    display: grid;
+    grid-template-columns: 44px 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset;
+    transition: border-color .15s, background .15s, transform .15s;
+  }
+  .secret:hover { border-color: var(--border-strong); background: var(--bg-elev-2); }
+  .secret.expiring { border-color: rgba(250,204,21,0.45); }
+  .secret.expired { border-color: rgba(255,107,107,0.45); }
+
+  .ring {
+    position: relative;
+    width: 40px; height: 40px;
+  }
+  .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 4; }
+  .ring .track { stroke: var(--surface-2); }
+  .ring .progress {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s linear, stroke .3s;
+  }
+  .secret.expiring .ring .progress { stroke: var(--warn); }
+  .secret.expired .ring .progress { stroke: var(--danger); }
+  .ring .num {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .who { min-width: 0; }
+  .issuer {
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .issuer .tag {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-faint);
+    background: var(--surface);
+    padding: 1px 6px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .account {
+    font-size: 12px;
+    color: var(--text-faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .code-wrap {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  }
+  .code {
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 22px;
+    letter-spacing: 2px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    user-select: all;
+    min-width: 130px;
+    text-align: center;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .code:hover { border-color: var(--accent); }
+  .code.copied {
+    background: rgba(74,222,128,0.18);
+    border-color: var(--good);
+    color: var(--good);
+  }
+  .code-hint { font-size: 11px; color: var(--text-faint); }
+
+  .row-actions {
+    display: flex; gap: 4px;
+    opacity: 0;
+    transition: opacity .15s;
+  }
+  .secret:hover .row-actions,
+  .secret:focus-within .row-actions { opacity: 1; }
+  .icon-btn {
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .icon-btn:hover { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  /* -------- Empty -------- */
+  .empty {
+    display: grid;
+    place-items: center;
+    gap: 12px;
+    padding: 60px 20px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  .empty .glyph {
+    width: 56px; height: 56px;
+    border-radius: 16px;
+    background: var(--surface);
+    display: grid; place-items: center;
+    color: var(--text-dim);
+  }
+  .empty .glyph svg { width: 28px; height: 28px; }
+  .empty h3 { margin: 0; color: var(--text); font-size: 16px; font-weight: 600; }
+  .empty p { margin: 0; max-width: 380px; }
+
+  /* -------- Modal -------- */
+  .scrim {
+    position: fixed; inset: 0;
+    background: rgba(5,8,20,0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: grid; place-items: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s;
+  }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .dialog {
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 64px);
+    overflow: auto;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    transform: translateY(8px) scale(0.98);
+    transition: transform .18s;
+  }
+  .scrim.show .dialog { transform: none; }
+  .dialog header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dialog header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  .dialog header .close { margin-left: auto; }
+  .dialog .body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .dialog footer {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev-2);
+    border-bottom-left-radius: 14px; border-bottom-right-radius: 14px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+  .field input, .field select, .field textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    color: var(--text);
+    transition: border-color .15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+  .field .help { font-size: 11px; color: var(--text-faint); }
+  .field .err { font-size: 12px; color: var(--danger); min-height: 16px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 480px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* -------- Scanner -------- */
+  .scanner {
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius);
+    padding: 8px;
+    background: #000;
+    aspect-ratio: 4 / 3;
+    display: grid; place-items: center;
+    overflow: hidden;
+    position: relative;
+  }
+  .scanner video { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
+  .scanner .hint {
+    position: absolute; left: 0; right: 0; bottom: 8px;
+    text-align: center; font-size: 12px; color: #fff;
+    background: rgba(0,0,0,0.4);
+    padding: 4px;
+  }
+
+  /* -------- Toast -------- */
+  .toasts {
+    position: fixed; bottom: 16px; right: 16px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 200;
+  }
+  .toast {
+    padding: 10px 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    font-size: 13px;
+    color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+    min-width: 200px;
+    animation: slide-in .2s ease-out;
+  }
+  .toast.good { border-color: rgba(74,222,128,0.45); }
+  .toast.bad { border-color: rgba(255,107,107,0.45); }
+  .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .toast.good .dot { background: var(--good); }
+  .toast.bad .dot { background: var(--danger); }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* -------- Reduced motion -------- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+    .ring .progress { transition: none; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>2fa</h1>
-  <span id="status">loading…</span>
-</header>
-<main>
-  <form id="add" onsubmit="return false">
-    <input id="uri" placeholder="otpauth://totp/Issuer:Account?secret=…">
-    <div style="display:flex;gap:8px;">
-      <input id="manual-issuer" placeholder="issuer">
-      <input id="manual-account" placeholder="account">
-      <input id="manual-secret" placeholder="base32 secret">
+<div class="app">
+
+  <header class="top">
+    <h1><span class="logo">2F</span> 2fa — TOTP Vault</h1>
+    <span id="status" class="status" aria-live="polite"><span class="dot"></span><span class="label">…</span><span class="addr"></span></span>
+    <label class="search" aria-label="Search secrets">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input id="q" type="search" placeholder="Search issuer or account…" autocomplete="off" spellcheck="false">
+    </label>
+  </header>
+
+  <aside class="side">
+    <ul id="groups" class="group-list" aria-label="Groups"></ul>
+    <button id="new-group-btn" class="add-group" type="button">+ New group</button>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <span id="count" class="title">0 secrets</span>
+      <button id="add-btn" class="btn primary" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Add secret
+      </button>
+      <button id="scan-btn" class="btn" type="button">Scan QR</button>
+      <button id="lock-btn" class="btn ghost" type="button" hidden>Lock</button>
     </div>
-    <div style="display:flex;gap:8px;">
-      <button type="button" id="add-uri-btn">Add via URI</button>
-      <button type="button" id="add-manual-btn">Add manually</button>
-      <button type="button" id="scan-btn">Scan QR</button>
+    <ul id="secrets" class="secrets" aria-label="Secrets"></ul>
+    <div id="empty" class="empty" hidden>
+      <div class="glyph">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <h3>No secrets yet</h3>
+      <p>Add your first TOTP entry to start generating one-time codes. Paste an <code>otpauth://</code> URI, type one in manually, or scan a QR code.</p>
+      <button class="btn primary" type="button" onclick="document.getElementById('add-btn').click()">Add your first secret</button>
     </div>
-    <div id="qr"><video id="video" autoplay playsinline></video><canvas id="canvas" hidden></canvas></div>
-  </form>
-  <ul id="secrets"></ul>
-</main>
+  </main>
+
+</div>
+
+<!-- Add / Edit dialog -->
+<div id="dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="dialog-title" hidden>
+  <div class="dialog">
+    <header>
+      <h2 id="dialog-title">Add secret</h2>
+      <button class="icon-btn close" type="button" aria-label="Close" data-close>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="body">
+      <section id="panel-uri" class="field">
+        <textarea id="uri" rows="3" placeholder="otpauth://totp/Issuer:Account?secret=JBSWY3DPEHPK3PXP&amp;issuer=Issuer"></textarea>
+      </section>
+
+      <section id="panel-manual" hidden class="field" style="gap:12px">
+        <input id="issuer" type="text" autocomplete="off" placeholder="Name">
+        <input id="secret" type="text" autocomplete="off" spellcheck="false" placeholder="Secret">
+      </section>
+
+      <div id="dialog-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button class="btn ghost" type="button" data-close>Cancel</button>
+      <button id="save-btn" class="btn primary" type="button">Save</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Edit dialog -->
+<div id="edit-dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="edit-title" hidden>
+  <div class="dialog">
+    <header>
+      <h2 id="edit-title">Edit secret</h2>
+      <button class="icon-btn close" type="button" aria-label="Close" data-close>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="body">
+      <div class="grid-2">
+        <div class="field"><label for="e-issuer">Issuer</label><input id="e-issuer" type="text" autocomplete="off"></div>
+        <div class="field"><label for="e-account">Account</label><input id="e-account" type="text" autocomplete="off"></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label for="e-digits">Digits</label><select id="e-digits"><option>6</option><option>7</option><option>8</option></select></div>
+        <div class="field"><label for="e-period">Period</label><select id="e-period"><option>30</option><option>60</option></select></div>
+      </div>
+      <div class="field"><label for="e-group">Group</label><select id="e-group"><option value="0">Unassigned</option></select></div>
+      <div class="field"><label for="e-notes">Notes</label><textarea id="e-notes" rows="3"></textarea></div>
+      <div id="edit-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button id="delete-btn" class="btn danger" type="button">Delete</button>
+      <span style="flex:1"></span>
+      <button class="btn ghost" type="button" data-close>Cancel</button>
+      <button id="edit-save-btn" class="btn primary" type="button">Save</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Confirm dialog -->
+<div id="confirm" class="scrim" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" hidden>
+  <div class="dialog" style="width:min(420px, calc(100vw - 32px))">
+    <header><h2 id="confirm-title">Confirm</h2></header>
+    <div class="body"><p id="confirm-body" style="margin:0"></p></div>
+    <footer>
+      <button class="btn ghost" type="button" data-confirm="no">Cancel</button>
+      <button class="btn danger" type="button" data-confirm="yes">Confirm</button>
+    </footer>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
 <script src="app.js"></script>
 <script src="jsqr.min.js"></script>
 </body>

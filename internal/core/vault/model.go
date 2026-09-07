@@ -28,11 +28,11 @@ const (
 
 // Group is a single-level folder for secrets. ID 0 means "Unassigned".
 type Group struct {
-	ID        int64
-	Name      string
-	Color     string // hex like "#7c3aed"; empty means default
-	SortOrder int
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Color     string    `json:"color"`     // hex like "#7c3aed"; empty means default
+	SortOrder int       `json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Secret is the in-memory representation. SecretRaw, Notes, BackupCodes
