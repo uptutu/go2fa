@@ -2,19 +2,19 @@
 //
 // Subcommands:
 //
-//   init         initialize a vault (prompts for password unless --no-password)
-//   unlock       prompt for password and load KEK into the running process
-//   lock         zero the in-memory KEK
-//   list         list secrets
-//   add          add a secret (URI or interactive)
-//   copy         print current TOTP code to stdout and clipboard if available
-//   delete       delete a secret
-//   edit         edit a secret's metadata
-//   group        manage groups
-//   export       export the vault (encrypted .2fa, or plain aegis/otpauth)
-//   import       import from .2fa / Aegis JSON / otpauth URI list
-//   tui          launch the bubbletea TUI
-//   web          launch the embedded web UI
+//	init         initialize a vault (prompts for password unless --no-password)
+//	unlock       prompt for password and load KEK into the running process
+//	lock         zero the in-memory KEK
+//	list         list secrets
+//	add          add a secret (URI or interactive)
+//	copy         print current TOTP code to stdout and clipboard if available
+//	delete       delete a secret
+//	edit         edit a secret's metadata
+//	group        manage groups
+//	export       export the vault (encrypted .2fa, or plain aegis/otpauth)
+//	import       import from .2fa / Aegis JSON / otpauth URI list
+//	tui          launch the bubbletea TUI
+//	web          launch the embedded web UI
 //
 // All subcommands auto-prompt for password if the vault is locked.
 package main

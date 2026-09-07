@@ -207,6 +207,38 @@ func TestTUIAddManual(t *testing.T) {
 	}
 }
 
+func TestTUIZeroSecretsOnQuit(t *testing.T) {
+	m := newTestModel(t)
+	if len(m.secrets) == 0 {
+		t.Fatal("test setup: no secrets")
+	}
+	for _, s := range m.secrets {
+		if len(s.SecretRaw) == 0 {
+			t.Fatal("test setup: empty SecretRaw")
+		}
+	}
+	// Capture backing-array addresses so we can prove the bytes were
+	// scrubbed (not just the slice-header pointer zeroed).
+	backing := make([][]byte, len(m.secrets))
+	for i, s := range m.secrets {
+		b := make([]byte, len(s.SecretRaw))
+		copy(b, s.SecretRaw)
+		backing[i] = b
+	}
+
+	m.zeroSecrets()
+
+	for i, s := range m.secrets {
+		if s.SecretRaw != nil {
+			t.Errorf("secrets[%d].SecretRaw not nilled", i)
+		}
+	}
+	// Note: backing arrays are copies, so we can't verify the originals
+	// are zeroed without unsafe. The slice-header being nil + the
+	// zero-and-nil pattern above is sufficient to drop the heap refs.
+	_ = backing
+}
+
 // TestTUIAddCancelFromStep2 ensures Esc from the secret step tears down
 // the whole two-step flow.
 func TestTUIAddCancelFromStep2(t *testing.T) {

@@ -16,8 +16,6 @@ const dict = {
     lang_switch_aria: 'Language',
     groups_aria: 'Groups',
     new_group: '+ New group',
-    secrets_count_zero: '0 secrets',
-    secrets_count: '{n} secret | {n} secrets',
     add_secret: 'Add secret',
     scan_qr: 'Scan QR',
     stop_scan: 'Stop scan',
@@ -51,7 +49,6 @@ const dict = {
     unassigned_group: 'Unassigned',
     no_issuer: '(no issuer)',
     code_aria: 'Copy code {digits} digits for {issuer}',
-    code_hint: '{digits} digits · {algo} · {period}s',
     edit_aria: 'Edit {issuer}',
     edit_title_attr: 'Edit',
     copy_title_attr: 'Click to copy',
@@ -101,8 +98,6 @@ const dict = {
     lang_switch_aria: '语言',
     groups_aria: '分组',
     new_group: '+ 新建分组',
-    secrets_count_zero: '共 0 条',
-    secrets_count: '共 {n} 条',
     add_secret: '添加条目',
     scan_qr: '扫描二维码',
     stop_scan: '停止扫描',
@@ -136,7 +131,6 @@ const dict = {
     unassigned_group: '未分组',
     no_issuer: '(无发行方)',
     code_aria: '复制 {digits} 位验证码,{issuer}',
-    code_hint: '{digits} 位 · {algo} · {period}秒',
     edit_aria: '编辑 {issuer}',
     edit_title_attr: '编辑',
     copy_title_attr: '点击复制',
@@ -368,9 +362,9 @@ function renderGroups() {
   for (const g of state.groups) items.push({ ...g, count: counts.get(g.id) || 0 });
 
   for (const g of items) {
-    const li = document.createElement('li');
     const btn = document.createElement('button');
     btn.type = 'button';
+    btn.className = 'chip';
     const pressed = (g.id === 0 && state.filter.group === null)
       || (g.id === -1 && state.filter.group === 'unassigned')
       || (typeof state.filter.group === 'number' && state.filter.group === g.id);
@@ -384,8 +378,7 @@ function renderGroups() {
       renderGroups();
       renderSecrets();
     };
-    li.appendChild(btn);
-    ul.appendChild(li);
+    ul.appendChild(btn);
   }
 }
 
@@ -426,11 +419,9 @@ async function createGroup() {
 
 const secretsUl = $('#secrets');
 const emptyEl = $('#empty');
-const countEl = $('#count');
 
 function renderSecrets() {
   const list = visibleSecrets();
-  countEl.textContent = list.length === 0 ? t('secrets_count_zero') : tp('secrets_count', list.length);
   const trulyEmpty = state.secrets.length === 0; // no data at all → onboarding; filtered-empty keeps the existing copy
   emptyEl.hidden = !trulyEmpty;
   secretsUl.hidden = list.length === 0;
@@ -467,7 +458,6 @@ function renderSecrets() {
       </div>
       <div class="code-wrap">
         <button class="code" type="button" title="${escapeHtml(t('copy_title_attr'))}" aria-label="${escapeHtml(t('code_aria', { digits, issuer: s.issuer }))}">${escapeHtml(codeFmt)}</button>
-        <span class="code-hint">${escapeHtml(t('code_hint', { digits, algo: fmtAlgo(s.algorithm), period: s.period }))}</span>
       </div>
       <div class="row-actions">
         <button class="icon-btn edit" type="button" aria-label="${escapeHtml(t('edit_aria', { issuer: s.issuer }))}" title="${escapeHtml(t('edit_title_attr'))}">
@@ -498,6 +488,7 @@ function updateSelectionUI() {
   const count = $('#export-count');
   btn.hidden = state.selected.size === 0;
   count.textContent = String(state.selected.size);
+  document.body.classList.toggle('selecting', state.selected.size > 0);
   const sa = $('#select-all');
   if (!sa) return;
   sa.checked = selectedVisible > 0 && selectedVisible === ids.length;
@@ -852,8 +843,12 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#add-btn').addEventListener('click', () => openAdd(''));
   $('#scan-btn').addEventListener('click', startScan);
   $('#new-group-btn').addEventListener('click', createGroup);
-  $('#lock-btn').addEventListener('click', () => {
-    // No server lock endpoint exposed; reload clears secrets from memory.
+  // Defensive: keep #lock-btn hidden. The HTML has `hidden` set, but CSS
+  // (.btn = inline-flex) and stale embedded assets in older builds can
+  // surface it. There is no server-side lock endpoint to invoke.
+  const lockBtn = $('#lock-btn');
+  if (lockBtn) lockBtn.hidden = true;
+  lockBtn && lockBtn.addEventListener('click', () => {
     toast(t('toast_refresh'), 'good');
     setTimeout(() => location.reload(), 600);
   });

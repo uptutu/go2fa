@@ -220,6 +220,47 @@ func TestAPILoopbackNoTokenAllowed(t *testing.T) {
 	res.Body.Close()
 }
 
+func TestAPIQueryStringTokenRejected(t *testing.T) {
+	// Query-string `?token=` is no longer accepted; only the
+	// X-Auth-Token header gates non-loopback binds. This avoids the
+	// token landing in browser history / bookmarks / proxy logs.
+	dir := t.TempDir()
+	st, _ := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+	v := vault.NewForTesting(st, dir)
+	v.Init(context.Background(), vault.ModeNoPassword, "")
+	srv, _ := New("127.0.0.1:0", v, "secret-token")
+	if _, err := srv.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	// Query-string token: 401.
+	res, _ := http.Get("http://" + srv.Addr() + "/api/status?token=secret-token")
+	if res.StatusCode != 401 {
+		t.Errorf("?token= should be rejected, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
+func TestAPIPayloadTooLarge(t *testing.T) {
+	srv := newTestServer(t)
+	// 70 KiB body exceeds the 64 KiB limit on /api/secrets.
+	big := make([]byte, 70*1024)
+	for i := range big {
+		big[i] = 'A'
+	}
+	body := `{"issuer":"` + string(big) + `","secret":"JBSWY3DPEHPK3PXP"}`
+	res, err := http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
+		bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized POST: want 413, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
 func TestAPIPatchSecret(t *testing.T) {
 	srv := newTestServer(t)
 	uri := "otpauth://totp/GitHub:a?secret=JBSWY3DPEHPK3PXP"

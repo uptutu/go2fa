@@ -450,6 +450,7 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "ctrl+c", "q":
 		m.quitting = true
+		m.zeroSecrets()
 		return m, tea.Quit
 	case "?":
 		m.helpVisible = !m.helpVisible
@@ -968,6 +969,34 @@ func padRight(s string, width int) string {
 // Tab (0x09), newline, carriage return, form feed, backspace, and BEL are
 // kept as harmless layout/control bytes; every other C0 control and DEL is
 // dropped.
+
+// zeroSecrets wipes decrypted SecretRaw / Notes / BackupCodes bytes before
+// the process exits, so the plaintext doesn't linger in the heap waiting
+// for GC. Issuer / Account can't be zeroed (Go strings are immutable), but
+// the secrets themselves — which an attacker would actually need to forge
+// TOTP codes — are scrubbed.
+func (m *Model) zeroSecrets() {
+	for i := range m.secrets {
+		for j := range m.secrets[i].SecretRaw {
+			m.secrets[i].SecretRaw[j] = 0
+		}
+		for j := range m.secrets[i].Notes {
+			m.secrets[i].Notes[j] = 0
+		}
+		for j := range m.secrets[i].BackupCodes {
+			m.secrets[i].BackupCodes[j] = 0
+		}
+		m.secrets[i].SecretRaw = nil
+		m.secrets[i].Notes = nil
+		m.secrets[i].BackupCodes = nil
+	}
+	m.secrets = nil
+	m.filtered = nil
+	for k := range m.promoted {
+		delete(m.promoted, k)
+	}
+}
+
 func stripCtl(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

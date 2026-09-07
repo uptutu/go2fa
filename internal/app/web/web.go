@@ -15,15 +15,16 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/uptutu/go2fa/internal/core/importexport"
 	"github.com/uptutu/go2fa/internal/core/otpauth"
 	"github.com/uptutu/go2fa/internal/core/totp"
 	"github.com/uptutu/go2fa/internal/core/vault"
-	"github.com/uptutu/go2fa/internal/core/importexport"
 )
 
 // Server wraps the HTTP API.
@@ -104,10 +105,9 @@ func (s *Server) routes() {
 //
 //   - token == ""      : loopback allowed, non-loopback denied.
 //   - token != ""      : require matching X-Auth-Token header on every
-//                        request, loopback or not. Query-string token is
-//                        accepted as a fallback for the very first request
-//                        from a browser bookmarklet (URL is not logged
-//                        server-side; see THREAT_MODEL).
+//     request, loopback or not. Query-string tokens are
+//     rejected to avoid leaking the token into browser
+//     history, bookmarks, and HTTP access logs.
 //
 // Token comparison uses crypto/subtle.ConstantTimeCompare so a remote
 // attacker cannot mount a timing attack against the header value.
@@ -116,10 +116,51 @@ func (s *Server) authOK(r *http.Request) bool {
 		return s.Loopback()
 	}
 	tok := r.Header.Get("X-Auth-Token")
-	if tok == "" {
-		tok = r.URL.Query().Get("token")
-	}
 	return subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1
+}
+
+// originOK defends against CSRF on non-loopback binds: any state-changing
+// request whose Origin header points at a different host is rejected.
+// Loopback binds are exempt (single-user). Requests with no Origin (e.g.
+// curl) are allowed through; auth+token still gates them.
+func (s *Server) originOK(r *http.Request) bool {
+	if s.Loopback() {
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	bindHost, _, _ := net.SplitHostPort(s.Addr())
+	if bindHost == "" {
+		bindHost = s.Addr()
+	}
+	originHost := u.Hostname()
+	return strings.EqualFold(originHost, bindHost)
+}
+
+// gate is the single entry point for handler-level access checks: auth +
+// CSRF/origin. Returns true if the request may proceed; otherwise writes
+// the appropriate error response and returns false.
+func (s *Server) gate(r *http.Request, w http.ResponseWriter) bool {
+	if !s.authOK(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && !s.originOK(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+// writeForbidden short-circuits a CSRF / origin mismatch.
+func (s *Server) writeForbidden(w http.ResponseWriter) {
+	http.Error(w, "forbidden", http.StatusForbidden)
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, v any) {
@@ -169,8 +210,8 @@ func (s *Server) notFoundOrInternalErr(w http.ResponseWriter, r *http.Request, e
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	m, _ := s.v.LoadMeta(r.Context())
@@ -208,8 +249,8 @@ func (s *Server) currentCode(sec vault.Secret) (string, int) {
 }
 
 func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	switch r.Method {
@@ -295,8 +336,8 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/secrets/")
@@ -406,8 +447,8 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCode(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -431,8 +472,8 @@ func (s *Server) handleCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleParseOtpauth(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	readBounded(r, w, 64*1024)
@@ -464,8 +505,8 @@ func (s *Server) handleParseOtpauth(w http.ResponseWriter, r *http.Request) {
 // ponytail: scope-gate on ids is done in the handler below; backend never trusts
 // the client to filter secrets out of the vault.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -554,8 +595,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	switch r.Method {
@@ -589,8 +630,8 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 
 // handleGroupItem handles PATCH and DELETE on /api/groups/{id}.
 func (s *Server) handleGroupItem(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) {
-		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+	if !s.gate(r, w) {
+
 		return
 	}
 	idStr := strings.TrimPrefix(r.URL.Path, "/api/groups/")

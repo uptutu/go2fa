@@ -75,6 +75,9 @@ func launchWeb(v *vault.Vault, _ bool) error {
 		// and HTTP access logs of any reverse proxy.
 		fmt.Fprintln(os.Stderr, "Auth token (paste into the login prompt, or send as X-Auth-Token header):")
 		fmt.Fprintln(os.Stderr, "  ", token)
+		fmt.Fprintln(os.Stderr, "⚠ traffic is PLAINTEXT HTTP — any host on the LAN can sniff the token")
+		fmt.Fprintln(os.Stderr, "  and TOTP codes. Put a TLS terminator (caddy/nginx/stunnel) in front,")
+		fmt.Fprintln(os.Stderr, "  or bind to a trusted interface only.")
 	}
 	if err := openBrowser(url); err != nil {
 		fmt.Fprintln(os.Stderr, "could not open browser automatically:", err)
