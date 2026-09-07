@@ -42,9 +42,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"2fa/internal/core/otpauth"
-	"2fa/internal/core/totp"
-	"2fa/internal/core/vault"
+	"github.com/uptutu/go2fa/internal/core/otpauth"
+	"github.com/uptutu/go2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
 type tickMsg time.Time

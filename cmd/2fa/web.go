@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	webapp "2fa/internal/app/web"
-	"2fa/internal/core/vault"
+	webapp "github.com/uptutu/go2fa/internal/app/web"
+	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
 var cmdWeb = &cobra.Command{

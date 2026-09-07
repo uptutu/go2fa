@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/totp"
 )
 
 func TestParseBasic(t *testing.T) {

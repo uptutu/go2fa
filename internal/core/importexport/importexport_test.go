@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"2fa/internal/core/crypto"
-	"2fa/internal/core/otpauth"
-	"2fa/internal/core/totp"
-	"2fa/internal/core/vault"
+	"github.com/uptutu/go2fa/internal/core/crypto"
+	"github.com/uptutu/go2fa/internal/core/otpauth"
+	"github.com/uptutu/go2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
 func newVault(t *testing.T) *vault.Vault {

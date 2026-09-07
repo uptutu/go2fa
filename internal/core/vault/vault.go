@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"2fa/internal/core/crypto"
+	"github.com/uptutu/go2fa/internal/core/crypto"
 )
 
 // DirName is the folder under $HOME where vault files live.

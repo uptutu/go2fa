@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"2fa/internal/core/crypto"
-	"2fa/internal/core/otpauth"
-	"2fa/internal/core/vault"
+	"github.com/uptutu/go2fa/internal/core/crypto"
+	"github.com/uptutu/go2fa/internal/core/otpauth"
+	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
 // ExportVault writes all secrets and groups in the chosen format.

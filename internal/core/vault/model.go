@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/totp"
 )
 
 // VaultMode reflects whether a password is required.

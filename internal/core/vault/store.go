@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite" // pure-Go sqlite driver
 
-	"2fa/internal/core/crypto"
-	"2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/crypto"
+	"github.com/uptutu/go2fa/internal/core/totp"
 )
 
 // schema is the single source of truth for the on-disk layout.

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"2fa/internal/core/vault"
-	"2fa/internal/tui"
+	"github.com/uptutu/go2fa/internal/core/vault"
+	"github.com/uptutu/go2fa/internal/tui"
 )
 
 // runTUI opens the vault and launches the bubbletea program.

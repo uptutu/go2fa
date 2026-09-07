@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"2fa/internal/core/totp"
-	"2fa/internal/core/vault"
+	"github.com/uptutu/go2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
 func TestStripCtl(t *testing.T) {

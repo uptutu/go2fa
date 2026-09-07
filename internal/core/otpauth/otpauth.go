@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	"2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/totp"
 )
 
 // Type is the OTP kind; only "totp" is supported by this tool (HOTP is rare).

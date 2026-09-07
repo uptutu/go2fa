@@ -34,10 +34,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"2fa/internal/core/importexport"
-	"2fa/internal/core/otpauth"
-	"2fa/internal/core/totp"
-	"2fa/internal/core/vault"
+	"github.com/uptutu/go2fa/internal/core/importexport"
+	"github.com/uptutu/go2fa/internal/core/otpauth"
+	"github.com/uptutu/go2fa/internal/core/totp"
+	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
 var (

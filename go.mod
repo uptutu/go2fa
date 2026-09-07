@@ -1,4 +1,4 @@
-module 2fa
+module github.com/uptutu/go2fa
 
 go 1.27.0
 
