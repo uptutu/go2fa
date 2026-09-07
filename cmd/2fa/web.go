@@ -58,8 +58,6 @@ func launchWeb(v *vault.Vault, _ bool) error {
 	nonLoopback := host != "" && host != "127.0.0.1" && host != "localhost" && host != "::1"
 	if nonLoopback && token == "" {
 		token = webapp.NewAuthToken()
-		fmt.Fprintln(os.Stderr, "Non-loopback bind; auth token (required in X-Auth-Token or ?token=):")
-		fmt.Fprintln(os.Stderr, "  ", token)
 	}
 	srv, err := webapp.New(addr, v, token)
 	if err != nil {
@@ -70,10 +68,14 @@ func launchWeb(v *vault.Vault, _ bool) error {
 		return err
 	}
 	url := "http://" + bound
-	if nonLoopback {
-		url += "/?token=" + token
-	}
 	fmt.Fprintln(os.Stderr, "2fa web ready at", url)
+	if nonLoopback {
+		// Token printed separately, not embedded in the URL: avoids the
+		// token landing in browser history, bookmarks, shared screenshots,
+		// and HTTP access logs of any reverse proxy.
+		fmt.Fprintln(os.Stderr, "Auth token (paste into the login prompt, or send as X-Auth-Token header):")
+		fmt.Fprintln(os.Stderr, "  ", token)
+	}
 	if err := openBrowser(url); err != nil {
 		fmt.Fprintln(os.Stderr, "could not open browser automatically:", err)
 		fmt.Fprintln(os.Stderr, "open this URL in your browser:", url)

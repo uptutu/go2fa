@@ -12,6 +12,29 @@ import (
 	"2fa/internal/core/vault"
 )
 
+func TestStripCtl(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"plain", "plain"},
+		{"with\ttab", "with\ttab"},
+		{"with\nnewline", "with\nnewline"},
+		// ESC + cursor positioning — the whole CSI sequence is dropped.
+		{"\x1b[2Jowned", "owned"},
+		// OSC title-set terminated by BEL — drops the whole sequence.
+		{"before\x1b]0;owned\x07after", "beforeafter"},
+		// Stray control char in the middle is dropped.
+		{"ab\x00cd", "abcd"},
+		// DEL (0x7F) dropped.
+		{"ab\x7Fcd", "abcd"},
+	}
+	for _, c := range cases {
+		if got := stripCtl(c.in); got != c.want {
+			t.Errorf("stripCtl(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func newTestModel(t *testing.T) *Model {
 	t.Helper()
 	dir := t.TempDir()
@@ -54,7 +77,7 @@ func newTestModel(t *testing.T) *Model {
 	return m
 }
 
-func key(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+func kmsg(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 
 // findGroup returns the ID of the group with the given name, or 0.
 func findGroup(m *Model, name string) int64 {
@@ -73,19 +96,19 @@ func TestTUIGroupCycle(t *testing.T) {
 	if m.group != -1 {
 		t.Fatalf("initial group: %d, want -1", m.group)
 	}
-	m.onKey(key("g"))
+	m.onKey(kmsg("g"))
 	if m.group != 0 {
 		t.Errorf("after first g: %d, want 0 (Unassigned)", m.group)
 	}
-	m.onKey(key("g"))
+	m.onKey(kmsg("g"))
 	if m.group != m.groups[0].ID {
 		t.Errorf("after second g: %d, want first group %d (%s)", m.group, m.groups[0].ID, m.groups[0].Name)
 	}
-	m.onKey(key("g"))
+	m.onKey(kmsg("g"))
 	if m.group != m.groups[1].ID {
 		t.Errorf("after third g: %d, want second group %d (%s)", m.group, m.groups[1].ID, m.groups[1].Name)
 	}
-	m.onKey(key("g"))
+	m.onKey(kmsg("g"))
 	if m.group != -1 {
 		t.Errorf("after fourth g (wrap): %d, want -1 (All)", m.group)
 	}
@@ -93,7 +116,7 @@ func TestTUIGroupCycle(t *testing.T) {
 
 func TestTUIAddMode(t *testing.T) {
 	m := newTestModel(t)
-	m.onKey(key("a"))
+	m.onKey(kmsg("a"))
 	if !m.addMode {
 		t.Fatal("addMode not entered")
 	}
@@ -103,7 +126,7 @@ func TestTUIAddMode(t *testing.T) {
 	if !strings.HasPrefix(m.addInput, "otpauth://") {
 		t.Errorf("addInput not captured: %q", m.addInput)
 	}
-	m.onKey(key("enter"))
+	m.onKey(kmsg("enter"))
 	if m.addMode {
 		t.Error("addMode not exited on enter")
 	}
@@ -118,9 +141,9 @@ func TestTUIAddMode(t *testing.T) {
 
 func TestTUIAddCancel(t *testing.T) {
 	m := newTestModel(t)
-	m.onKey(key("a"))
-	m.onKey(key("o"))
-	m.onKey(key("esc"))
+	m.onKey(kmsg("a"))
+	m.onKey(kmsg("o"))
+	m.onKey(kmsg("esc"))
 	if m.addMode {
 		t.Error("addMode not exited on esc")
 	}
@@ -141,5 +164,63 @@ func TestTUIViewShowsGroups(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing secret %q", want)
 		}
+	}
+}
+
+// TestTUIAddManual covers the new two-step manual add flow: pressing 'a',
+// then Enter on an empty URI buffer, then typing a name + Enter + a base32
+// secret + Enter. The new secret should appear in the vault under that name.
+func TestTUIAddManual(t *testing.T) {
+	m := newTestModel(t)
+	m.onKey(kmsg("a"))
+	m.onKey(kmsg("enter")) // empty URI → jump to name step
+	if m.addStep != 1 {
+		t.Fatalf("expected addStep=1 after empty enter, got %d", m.addStep)
+	}
+	for _, c := range "MyIssuer" {
+		m.onKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c}})
+	}
+	m.onKey(kmsg("enter"))
+	if m.addStep != 2 {
+		t.Fatalf("expected addStep=2 after name enter, got %d", m.addStep)
+	}
+	for _, c := range "JBSWY3DPEHPK3PXP" {
+		m.onKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c}})
+	}
+	m.onKey(kmsg("enter"))
+	if m.addMode {
+		t.Errorf("addMode not exited after manual submit")
+	}
+	all, err := m.v.ListSecrets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range all {
+		if s.Issuer == "MyIssuer" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("manual add did not persist: %+v", all)
+	}
+}
+
+// TestTUIAddCancelFromStep2 ensures Esc from the secret step tears down
+// the whole two-step flow.
+func TestTUIAddCancelFromStep2(t *testing.T) {
+	m := newTestModel(t)
+	m.onKey(kmsg("a"))
+	m.onKey(kmsg("enter"))
+	if m.addStep != 1 {
+		t.Fatalf("setup: want step 1, got %d", m.addStep)
+	}
+	m.onKey(kmsg("esc"))
+	if m.addMode {
+		t.Error("esc from name step should leave addMode")
+	}
+	if m.addStep != 0 {
+		t.Errorf("esc should reset addStep to 0, got %d", m.addStep)
 	}
 }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -152,6 +152,30 @@
   .status.error .dot { background: var(--danger); box-shadow: 0 0 0 3px rgba(255,107,107,0.18); }
   .status .addr { color: var(--text-faint); margin-left: 4px; }
 
+  /* -------- Lang switch -------- */
+  .lang-switch {
+    display: inline-flex;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .lang-switch button {
+    background: transparent;
+    border: 0;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    transition: background .15s, color .15s;
+  }
+  .lang-switch button:hover { color: var(--text); }
+  .lang-switch button[aria-pressed="true"] {
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 600;
+  }
+
   /* -------- Sidebar -------- */
   aside.side {
     grid-area: side;
@@ -238,6 +262,24 @@
   .btn.danger { color: var(--danger); }
   .btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
   .btn.ghost:hover { color: var(--text); background: var(--surface); }
+  .btn .count {
+    font-size: 11px; line-height: 1;
+    background: rgba(124,156,255,0.18);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 999px;
+    margin-left: 2px;
+  }
+  .check {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-dim);
+    cursor: pointer; user-select: none;
+    padding: 4px 8px; border-radius: var(--radius-sm);
+  }
+  .check:hover { color: var(--text); }
+  .check input { accent-color: var(--accent); }
+  .pick { display: grid; place-items: center; cursor: pointer; }
+  .pick input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 
   /* -------- Secrets list -------- */
   .secrets {
@@ -248,7 +290,7 @@
   }
   .secret {
     display: grid;
-    grid-template-columns: 44px 1fr auto auto;
+    grid-template-columns: 24px 44px 1fr auto auto;
     align-items: center;
     gap: 12px;
     padding: 12px 14px;
@@ -490,41 +532,55 @@
 <div class="app">
 
   <header class="top">
-    <h1><span class="logo">2F</span> 2fa — TOTP Vault</h1>
+    <h1><span class="logo">2F</span> <span data-i18n="app_title">2fa — TOTP Vault</span></h1>
     <span id="status" class="status" aria-live="polite"><span class="dot"></span><span class="label">…</span><span class="addr"></span></span>
-    <label class="search" aria-label="Search secrets">
+    <div class="lang-switch" role="group" data-i18n-aria="lang_switch_aria">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="zh" aria-pressed="false">中</button>
+    </div>
+    <label class="search" data-i18n-aria="search_aria">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
       </svg>
-      <input id="q" type="search" placeholder="Search issuer or account…" autocomplete="off" spellcheck="false">
+      <input id="q" type="search" data-i18n-placeholder="search_placeholder" autocomplete="off" spellcheck="false">
     </label>
   </header>
 
   <aside class="side">
-    <ul id="groups" class="group-list" aria-label="Groups"></ul>
-    <button id="new-group-btn" class="add-group" type="button">+ New group</button>
+    <ul id="groups" class="group-list" data-i18n-aria="groups_aria"></ul>
+    <button id="new-group-btn" class="add-group" type="button"><span data-i18n="new_group">+ New group</span></button>
   </aside>
 
   <main>
     <div class="toolbar">
-      <span id="count" class="title">0 secrets</span>
+      <span id="count" class="title"><span data-i18n="secrets_count_zero">0 secrets</span></span>
+      <label class="check">
+        <input id="select-all" type="checkbox" aria-label="Select all">
+        <span data-i18n="select_all">Select all</span>
+      </label>
+      <button id="export-btn" class="btn" type="button" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 7 5-7"/><path d="M5 21h14"/></svg>
+        <span data-i18n="export">Export</span>
+        <span id="export-count" class="count">0</span>
+      </button>
+      <span style="flex:1"></span>
       <button id="add-btn" class="btn primary" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        Add secret
+        <span data-i18n="add_secret">Add secret</span>
       </button>
-      <button id="scan-btn" class="btn" type="button">Scan QR</button>
-      <button id="lock-btn" class="btn ghost" type="button" hidden>Lock</button>
+      <button id="scan-btn" class="btn" type="button"><span data-i18n="scan_qr">Scan QR</span></button>
+      <button id="lock-btn" class="btn ghost" type="button" data-i18n="lock" hidden>Lock</button>
     </div>
-    <ul id="secrets" class="secrets" aria-label="Secrets"></ul>
+    <ul id="secrets" class="secrets" data-i18n-aria="secrets_aria"></ul>
     <div id="empty" class="empty" hidden>
       <div class="glyph">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
         </svg>
       </div>
-      <h3>No secrets yet</h3>
-      <p>Add your first TOTP entry to start generating one-time codes. Paste an <code>otpauth://</code> URI, type one in manually, or scan a QR code.</p>
-      <button class="btn primary" type="button" onclick="document.getElementById('add-btn').click()">Add your first secret</button>
+      <h3 data-i18n="empty_title">No secrets yet</h3>
+      <p data-i18n="empty_body">Add your first TOTP entry to start generating one-time codes. Paste an <code>otpauth://</code> URI, type one in manually, or scan a QR code.</p>
+      <button class="btn primary" type="button" onclick="document.getElementById('add-btn').click()" data-i18n="empty_cta">Add your first secret</button>
     </div>
   </main>
 
@@ -534,26 +590,26 @@
 <div id="dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="dialog-title" hidden>
   <div class="dialog">
     <header>
-      <h2 id="dialog-title">Add secret</h2>
-      <button class="icon-btn close" type="button" aria-label="Close" data-close>
+      <h2 id="dialog-title" data-i18n="add_secret">Add secret</h2>
+      <button class="icon-btn close" type="button" data-i18n-aria="close_aria" data-close>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </header>
     <div class="body">
       <section id="panel-uri" class="field">
-        <textarea id="uri" rows="3" placeholder="otpauth://totp/Issuer:Account?secret=JBSWY3DPEHPK3PXP&amp;issuer=Issuer"></textarea>
+        <textarea id="uri" rows="3" data-i18n-placeholder="uri_placeholder"></textarea>
       </section>
 
       <section id="panel-manual" hidden class="field" style="gap:12px">
-        <input id="issuer" type="text" autocomplete="off" placeholder="Name">
-        <input id="secret" type="text" autocomplete="off" spellcheck="false" placeholder="Secret">
+        <input id="issuer" type="text" autocomplete="off" data-i18n-placeholder="name_placeholder">
+        <input id="secret" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="secret_placeholder">
       </section>
 
       <div id="dialog-err" class="err" role="alert" aria-live="polite"></div>
     </div>
     <footer>
-      <button class="btn ghost" type="button" data-close>Cancel</button>
-      <button id="save-btn" class="btn primary" type="button">Save</button>
+      <button class="btn ghost" type="button" data-close data-i18n="cancel">Cancel</button>
+      <button id="save-btn" class="btn primary" type="button" data-i18n="save">Save</button>
     </footer>
   </div>
 </div>
@@ -562,29 +618,29 @@
 <div id="edit-dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="edit-title" hidden>
   <div class="dialog">
     <header>
-      <h2 id="edit-title">Edit secret</h2>
-      <button class="icon-btn close" type="button" aria-label="Close" data-close>
+      <h2 id="edit-title" data-i18n="edit_secret">Edit secret</h2>
+      <button class="icon-btn close" type="button" data-i18n-aria="close_aria" data-close>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </header>
     <div class="body">
       <div class="grid-2">
-        <div class="field"><label for="e-issuer">Issuer</label><input id="e-issuer" type="text" autocomplete="off"></div>
-        <div class="field"><label for="e-account">Account</label><input id="e-account" type="text" autocomplete="off"></div>
+        <div class="field"><label for="e-issuer" data-i18n="issuer_label">Issuer</label><input id="e-issuer" type="text" autocomplete="off"></div>
+        <div class="field"><label for="e-account" data-i18n="account_label">Account</label><input id="e-account" type="text" autocomplete="off"></div>
       </div>
       <div class="grid-2">
-        <div class="field"><label for="e-digits">Digits</label><select id="e-digits"><option>6</option><option>7</option><option>8</option></select></div>
-        <div class="field"><label for="e-period">Period</label><select id="e-period"><option>30</option><option>60</option></select></div>
+        <div class="field"><label for="e-digits" data-i18n="digits_label">Digits</label><select id="e-digits"><option>6</option><option>7</option><option>8</option></select></div>
+        <div class="field"><label for="e-period" data-i18n="period_label">Period</label><select id="e-period"><option>30</option><option>60</option></select></div>
       </div>
-      <div class="field"><label for="e-group">Group</label><select id="e-group"><option value="0">Unassigned</option></select></div>
-      <div class="field"><label for="e-notes">Notes</label><textarea id="e-notes" rows="3"></textarea></div>
+      <div class="field"><label for="e-group" data-i18n="group_label">Group</label><select id="e-group"><option value="0" data-i18n="unassigned">Unassigned</option></select></div>
+      <div class="field"><label for="e-notes" data-i18n="notes_label">Notes</label><textarea id="e-notes" rows="3"></textarea></div>
       <div id="edit-err" class="err" role="alert" aria-live="polite"></div>
     </div>
     <footer>
-      <button id="delete-btn" class="btn danger" type="button">Delete</button>
+      <button id="delete-btn" class="btn danger" type="button" data-i18n="delete">Delete</button>
       <span style="flex:1"></span>
-      <button class="btn ghost" type="button" data-close>Cancel</button>
-      <button id="edit-save-btn" class="btn primary" type="button">Save</button>
+      <button class="btn ghost" type="button" data-close data-i18n="cancel">Cancel</button>
+      <button id="edit-save-btn" class="btn primary" type="button" data-i18n="save">Save</button>
     </footer>
   </div>
 </div>
@@ -592,11 +648,63 @@
 <!-- Confirm dialog -->
 <div id="confirm" class="scrim" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" hidden>
   <div class="dialog" style="width:min(420px, calc(100vw - 32px))">
-    <header><h2 id="confirm-title">Confirm</h2></header>
+    <header><h2 id="confirm-title" data-i18n="please_confirm">Please confirm</h2></header>
     <div class="body"><p id="confirm-body" style="margin:0"></p></div>
     <footer>
-      <button class="btn ghost" type="button" data-confirm="no">Cancel</button>
-      <button class="btn danger" type="button" data-confirm="yes">Confirm</button>
+      <button class="btn ghost" type="button" data-confirm="no" data-i18n="cancel">Cancel</button>
+      <button class="btn danger" type="button" data-confirm="yes" data-i18n="confirm">Confirm</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Export dialog -->
+<div id="export-dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="export-title" hidden>
+  <div class="dialog" style="width:min(440px, calc(100vw - 32px))">
+    <header>
+      <h2 id="export-title" data-i18n="export_title">Export</h2>
+      <button class="icon-btn close" type="button" data-i18n-aria="close_aria" data-close>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="body">
+      <p data-i18n="export_body" style="margin:0;color:var(--text-dim)">Pick a format. Use otpauth:// for sharing or importing into another TOTP app.</p>
+      <div class="field">
+        <label for="exp-format" data-i18n="export_format">Format</label>
+        <select id="exp-format">
+          <option value="otpauth">otpauth:// (plaintext URI list)</option>
+          <option value="aegis">Aegis JSON (plaintext)</option>
+          <option value=".2fa">.2fa (password-encrypted)</option>
+        </select>
+      </div>
+      <div class="field" id="exp-pw-row" hidden>
+        <label for="exp-pw" data-i18n="export_password">Password</label>
+        <input id="exp-pw" type="password" autocomplete="new-password" spellcheck="false">
+        <span class="help" data-i18n="export_password_help">Used to encrypt the .2fa file. The recipient needs this same password to decrypt.</span>
+      </div>
+      <div id="export-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button class="btn ghost" type="button" data-close data-i18n="cancel">Cancel</button>
+      <button id="export-go" class="btn primary" type="button" data-i18n="export_download">Download</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Auth token prompt (shown on non-loopback bind or rejected token) -->
+<div id="auth" class="scrim" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+  <div class="dialog" style="width:min(440px, calc(100vw - 32px))">
+    <header><h2 id="auth-title" data-i18n="auth_title">Auth token required</h2></header>
+    <div class="body">
+      <p data-i18n="auth_body" style="margin:0;color:var(--text-dim)">The server is bound to a non-loopback address. Paste the token printed by <code>2fa web</code> on the server's terminal.</p>
+      <div class="field" style="margin-top:12px">
+        <label for="auth-token" data-i18n="auth_token_label">Token</label>
+        <input id="auth-token" type="password" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="auth-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button class="btn ghost" type="button" data-auth="no" data-i18n="cancel">Cancel</button>
+      <button class="btn primary" type="button" data-auth="yes" data-i18n="auth_submit">Unlock</button>
     </footer>
   </div>
 </div>

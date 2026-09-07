@@ -57,7 +57,7 @@ func main() {
 	root.PersistentFlags().StringVar(&flagListen, "listen", "", "address for web subcommand (default 127.0.0.1:random)")
 	root.PersistentFlags().StringVar(&flagToken, "token", "", "auth token for non-loopback --listen")
 
-	root.AddCommand(cmdInit, cmdUnlock, cmdLock, cmdList, cmdAdd, cmdCopy,
+	root.AddCommand(cmdInit, cmdUnlock, cmdList, cmdAdd, cmdCopy,
 		cmdDelete, cmdEdit, cmdGroup, cmdExport, cmdImport, cmdTUI, cmdWeb, cmdGUI)
 
 	if err := root.Execute(); err != nil {
@@ -218,15 +218,6 @@ var cmdUnlock = &cobra.Command{
 			return err
 		}
 		fmt.Fprintln(os.Stderr, "unlocked")
-		return nil
-	},
-}
-
-var cmdLock = &cobra.Command{
-	Use:   "lock",
-	Short: "Zero the in-memory KEK (no-op for non-interactive)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(os.Stderr, "locked (process exits clears KEK)")
 		return nil
 	},
 }

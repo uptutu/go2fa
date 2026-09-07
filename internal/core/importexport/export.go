@@ -40,6 +40,18 @@ func ExportVault(v *vault.Vault, format, password string) ([]byte, error) {
 	}
 }
 
+func ExportSecrets2FA(secrets []vault.Secret, groups []vault.Group, password string) ([]byte, error) {
+	return export2FA(secrets, groups, password)
+}
+
+func ExportSecretsAegis(secrets []vault.Secret, groups []vault.Group) ([]byte, error) {
+	return exportAegis(secrets, groups), nil
+}
+
+func ExportSecretsOtpauth(secrets []vault.Secret) ([]byte, error) {
+	return exportOtpauth(secrets), nil
+}
+
 func export2FA(secrets []vault.Secret, groups []vault.Group, password string) ([]byte, error) {
 	if password == "" {
 		return nil, fmt.Errorf("export .2fa requires --password")

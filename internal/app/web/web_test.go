@@ -165,8 +165,9 @@ func TestAPIPostPlainSecret(t *testing.T) {
 	res.Body.Close()
 }
 
-func TestAPIRequiresAuthWhenNonLoopback(t *testing.T) {
-	// Create a non-loopback-bound server with a token; verify auth is enforced.
+func TestAPIRequiresAuthWhenTokenSet(t *testing.T) {
+	// When a token is configured, every request (loopback included) must
+	// present a matching header. Token comparison is constant-time.
 	dir := t.TempDir()
 	st, _ := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
 	v := vault.NewForTesting(st, dir)
@@ -177,11 +178,44 @@ func TestAPIRequiresAuthWhenNonLoopback(t *testing.T) {
 	}
 	defer srv.Stop()
 
-	// Loopback is allowed by default (authOK returns true for loopback).
-	// Even with a token set, loopback requests still succeed.
+	// No header: 401, even on loopback.
+	res, _ := http.Get("http://" + srv.Addr() + "/api/status")
+	if res.StatusCode != 401 {
+		t.Errorf("no token: want 401, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	// Wrong header: 401.
+	req, _ := http.NewRequest("GET", "http://"+srv.Addr()+"/api/status", nil)
+	req.Header.Set("X-Auth-Token", "wrong")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 401 {
+		t.Errorf("wrong token: want 401, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	// Correct header: 200.
+	req, _ = http.NewRequest("GET", "http://"+srv.Addr()+"/api/status", nil)
+	req.Header.Set("X-Auth-Token", "secret-token")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Errorf("correct token: want 200, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
+func TestAPILoopbackNoTokenAllowed(t *testing.T) {
+	// Loopback with NO token configured: still open (default `2fa web` use).
+	srv := newTestServer(t)
 	res, _ := http.Get("http://" + srv.Addr() + "/api/status")
 	if res.StatusCode != 200 {
-		t.Errorf("loopback should be allowed regardless of token, got %d", res.StatusCode)
+		t.Errorf("loopback no-token: want 200, got %d", res.StatusCode)
 	}
 	res.Body.Close()
 }

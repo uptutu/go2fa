@@ -241,8 +241,10 @@ func (s *Store) ListSecrets(ctx context.Context) ([]Secret, error) {
 			&lastUsed, &created, &updated); err != nil {
 			return nil, err
 		}
-		sec.ID = uuid.MustParse(idStr)
-		var err error
+		sec.ID, err = uuid.Parse(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("vault: corrupt row id %q: %w", idStr, err)
+		}
 		if sec.SecretRaw, err = openNullable(s.kek, secEnc.String, secN.String); err != nil {
 			return nil, fmt.Errorf("decrypt secret %s: %w", sec.ID, err)
 		}
@@ -287,8 +289,11 @@ func (s *Store) GetSecret(ctx context.Context, id uuid.UUID) (Secret, error) {
 		&lastUsed, &created, &updated); err != nil {
 		return sec, err
 	}
-	sec.ID = uuid.MustParse(idStr)
 	var err error
+	sec.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return sec, fmt.Errorf("vault: corrupt row id %q: %w", idStr, err)
+	}
 	if sec.SecretRaw, err = openNullable(s.kek, secEnc.String, secN.String); err != nil {
 		return sec, err
 	}

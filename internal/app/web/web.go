@@ -5,6 +5,8 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +23,7 @@ import (
 	"2fa/internal/core/otpauth"
 	"2fa/internal/core/totp"
 	"2fa/internal/core/vault"
+	"2fa/internal/core/importexport"
 )
 
 // Server wraps the HTTP API.
@@ -93,30 +96,76 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/secrets/", s.handleSecretItem)
 	s.mux.HandleFunc("/api/code", s.handleCode)
 	s.mux.HandleFunc("/api/parse-otpauth", s.handleParseOtpauth)
+	s.mux.HandleFunc("/api/export", s.handleExport)
 	s.mux.Handle("/", http.FileServer(http.FS(staticFS)))
 }
 
+// authOK enforces the auth-token policy:
+//
+//   - token == ""      : loopback allowed, non-loopback denied.
+//   - token != ""      : require matching X-Auth-Token header on every
+//                        request, loopback or not. Query-string token is
+//                        accepted as a fallback for the very first request
+//                        from a browser bookmarklet (URL is not logged
+//                        server-side; see THREAT_MODEL).
+//
+// Token comparison uses crypto/subtle.ConstantTimeCompare so a remote
+// attacker cannot mount a timing attack against the header value.
 func (s *Server) authOK(r *http.Request) bool {
-	if s.Loopback() {
-		return true
-	}
 	if s.token == "" {
-		return false
+		return s.Loopback()
 	}
 	tok := r.Header.Get("X-Auth-Token")
 	if tok == "" {
 		tok = r.URL.Query().Get("token")
 	}
-	return tok == s.token
+	return subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(v)
 }
 
 func (s *Server) writeErr(w http.ResponseWriter, code int, msg string) {
 	http.Error(w, msg, code)
+}
+
+// internalErr logs the underlying error and returns a generic 500 to the
+// caller. Use this for server-side failures (decryption, DB, crypto) so
+// internal state and file paths do not leak through HTTP responses.
+func (s *Server) internalErr(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("web: %s %s: %v", r.Method, r.URL.Path, err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// readBounded caps the request body at max bytes to bound memory use from
+// authenticated POST/PATCH callers. After reading, check the error with
+// decodeErr / errors.As(&maxErr) to return 413 instead of 400.
+func readBounded(r *http.Request, w http.ResponseWriter, max int64) {
+	r.Body = http.MaxBytesReader(w, r.Body, max)
+}
+
+// decodeErr classifies json.Read errors and writes the right status.
+func (s *Server) decodeErr(w http.ResponseWriter, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadRequest)
+}
+
+// notFoundOrInternalErr returns true if err was a clean "not found" (404);
+// otherwise it logs err and writes a generic 500, returning false.
+func (s *Server) notFoundOrInternalErr(w http.ResponseWriter, r *http.Request, err error, notFoundMsg string) bool {
+	if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+		s.writeErr(w, http.StatusNotFound, notFoundMsg)
+		return true
+	}
+	s.internalErr(w, r, err)
+	return false
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +221,7 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 		}
 		secrets, err := s.v.ListSecrets(r.Context())
 		if err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		out := make([]secretJSON, 0, len(secrets))
@@ -199,8 +248,9 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 			Period    int    `json:"period"`
 			GroupID   int64  `json:"group_id"`
 		}
+		readBounded(r, w, 64*1024)
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			s.writeErr(w, http.StatusBadRequest, err.Error())
+			s.decodeErr(w, err)
 			return
 		}
 		var sec vault.Secret
@@ -235,7 +285,7 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := s.v.UpsertSecret(r.Context(), sec); err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		s.writeJSON(w, map[string]string{"id": sec.ID.String()})
@@ -263,7 +313,7 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		sec, err := s.v.GetSecret(r.Context(), uid)
 		if err != nil {
-			s.writeErr(w, http.StatusNotFound, err.Error())
+			s.notFoundOrInternalErr(w, r, err, "not found")
 			return
 		}
 		groups, _ := s.v.ListGroups(r.Context())
@@ -283,14 +333,15 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 			HasBackup: len(sec.BackupCodes) > 0,
 		})
 	case http.MethodPatch:
+		readBounded(r, w, 64*1024)
 		sec, err := s.v.GetSecret(r.Context(), uid)
 		if err != nil {
-			s.writeErr(w, http.StatusNotFound, err.Error())
+			s.notFoundOrInternalErr(w, r, err, "not found")
 			return
 		}
 		var patch map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			s.writeErr(w, http.StatusBadRequest, err.Error())
+			s.decodeErr(w, err)
 			return
 		}
 		if v, ok := patch["issuer"].(string); ok {
@@ -339,13 +390,13 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 			sec.GroupID = int64(v)
 		}
 		if err := s.v.UpsertSecret(r.Context(), sec); err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		s.writeJSON(w, map[string]bool{"ok": true})
 	case http.MethodDelete:
 		if err := s.v.DeleteSecret(r.Context(), uid); err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		s.writeJSON(w, map[string]bool{"ok": true})
@@ -371,7 +422,7 @@ func (s *Server) handleCode(w http.ResponseWriter, r *http.Request) {
 	}
 	sec, err := s.v.GetSecret(r.Context(), uid)
 	if err != nil {
-		s.writeErr(w, http.StatusNotFound, err.Error())
+		s.notFoundOrInternalErr(w, r, err, "not found")
 		return
 	}
 	code, rem := s.currentCode(sec)
@@ -384,13 +435,122 @@ func (s *Server) handleParseOtpauth(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	body, _ := io.ReadAll(r.Body)
+	readBounded(r, w, 64*1024)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		s.writeErr(w, http.StatusBadRequest, "read body")
+		return
+	}
 	u, err := otpauth.Parse(string(body))
 	if err != nil {
 		s.writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	s.writeJSON(w, u)
+}
+
+// handleExport returns a partial or full vault export.
+//
+// Request body: {"format":".2fa"|"aegis"|"otpauth", "ids":[uuid,...]?, "password":string?}
+//   - ids omitted/empty → export all secrets (current scope filter is applied client-side first)
+//   - format=".2fa" requires password
+//
+// Response: raw bytes (Content-Type set per format, Content-Disposition: attachment).
+// ponytail: scope-gate on ids is done in the handler below; backend never trusts
+// the client to filter secrets out of the vault.
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if !s.authOK(r) {
+		s.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Format   string   `json:"format"`
+		IDs      []string `json:"ids"`
+		Password string   `json:"password"`
+	}
+	readBounded(r, w, 64*1024)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		s.decodeErr(w, err)
+		return
+	}
+	switch in.Format {
+	case ".2fa", "aegis", "otpauth":
+	default:
+		s.writeErr(w, http.StatusBadRequest, "format must be .2fa|aegis|otpauth")
+		return
+	}
+	all, err := s.v.ListSecrets(r.Context())
+	if err != nil {
+		s.internalErr(w, r, err)
+		return
+	}
+	groups, _ := s.v.ListGroups(r.Context())
+	picked := all
+	if len(in.IDs) > 0 {
+		want := make(map[uuid.UUID]struct{}, len(in.IDs))
+		for _, id := range in.IDs {
+			u, err := uuid.Parse(id)
+			if err != nil {
+				s.writeErr(w, http.StatusBadRequest, "bad id: "+id)
+				return
+			}
+			want[u] = struct{}{}
+		}
+		picked = picked[:0]
+		for _, sec := range all {
+			if _, ok := want[sec.ID]; ok {
+				picked = append(picked, sec)
+			}
+		}
+		if len(picked) == 0 {
+			s.writeErr(w, http.StatusBadRequest, "no matching secrets")
+			return
+		}
+		// Scope groups to the ones actually used by picked, so the exported
+		// .2fa / aegis file doesn't carry orphan group names.
+		used := make(map[int64]struct{}, len(picked))
+		for _, sec := range picked {
+			used[sec.GroupID] = struct{}{}
+		}
+		filtered := groups[:0]
+		for _, g := range groups {
+			if _, ok := used[g.ID]; ok {
+				filtered = append(filtered, g)
+			}
+		}
+		groups = filtered
+	}
+	var data []byte
+	switch in.Format {
+	case ".2fa":
+		data, err = importexport.ExportSecrets2FA(picked, groups, in.Password)
+	case "aegis":
+		data, err = importexport.ExportSecretsAegis(picked, groups)
+	case "otpauth":
+		data, err = importexport.ExportSecretsOtpauth(picked)
+	}
+	if err != nil {
+		s.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ct := "application/octet-stream"
+	if in.Format == "aegis" {
+		ct = "application/json"
+	} else if in.Format == "otpauth" {
+		ct = "text/plain; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", `attachment; filename="export-`+in.Format+`"`)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
@@ -407,8 +567,9 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 			Name  string `json:"name"`
 			Color string `json:"color"`
 		}
+		readBounded(r, w, 16*1024)
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			s.writeErr(w, http.StatusBadRequest, err.Error())
+			s.decodeErr(w, err)
 			return
 		}
 		if in.Name == "" {
@@ -417,7 +578,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 		}
 		id, err := s.v.CreateGroup(r.Context(), vault.Group{Name: in.Name, Color: in.Color})
 		if err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		s.writeJSON(w, map[string]any{"id": id})
@@ -444,18 +605,19 @@ func (s *Server) handleGroupItem(w http.ResponseWriter, r *http.Request) {
 			Name  string `json:"name"`
 			Color string `json:"color"`
 		}
+		readBounded(r, w, 16*1024)
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			s.writeErr(w, http.StatusBadRequest, err.Error())
+			s.decodeErr(w, err)
 			return
 		}
 		if err := s.v.RenameGroup(r.Context(), id, patch.Name, patch.Color); err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		s.writeJSON(w, map[string]bool{"ok": true})
 	case http.MethodDelete:
 		if err := s.v.DeleteGroup(r.Context(), id); err != nil {
-			s.writeErr(w, http.StatusInternalServerError, err.Error())
+			s.internalErr(w, r, err)
 			return
 		}
 		s.writeJSON(w, map[string]bool{"ok": true})

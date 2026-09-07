@@ -5,11 +5,29 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"2fa/internal/core/totp"
 )
+
+func TestListSecretsCorruptUUID(t *testing.T) {
+	v := newTestVault(t, ModePassword, "pw")
+	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339)
+	// Inject a row with a non-UUID id (simulates tampered DB or migration glitch).
+	if _, err := v.db.ExecContext(ctx,
+		`INSERT INTO secrets(id, issuer, account, secret_enc, secret_nonce, algorithm, digits, period, created_at, updated_at)
+		 VALUES('not-a-uuid', 'x', '', '', '', 'SHA1', 6, 30, ?, ?)`,
+		now, now); err != nil {
+		t.Fatal(err)
+	}
+	// Must NOT panic; must surface as an error.
+	if _, err := v.ListSecrets(ctx); err == nil {
+		t.Fatal("expected error from corrupt row")
+	}
+}
 
 func newTestVault(t *testing.T, mode VaultMode, password string) *Vault {
 	t.Helper()
