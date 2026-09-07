@@ -1,0 +1,41 @@
+# Build artifacts
+/2fa
+/2fa-*
+/dist/
+*.exe
+
+# Test binaries / coverage
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local vault data — NEVER commit this
+# (default location is $HOME/.2fa, but support in-repo test vaults too)
+/.2fa/
+/vault.sqlite
+/vault.sqlite-*
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+machine.key
+
+# Go module cache (if vendor or local cache is committed by mistake)
+vendor/
+
+# goreleaser dist
+goreleaser-dist/
+
+# Node / Wails (in case wails-frontend is added later)
+node_modules/
+package-lock.json
+
+# oh-my-claudecode state (developer-local)
+.omc/
