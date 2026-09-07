@@ -50,7 +50,7 @@ chmod +x 2fa && sudo mv 2fa /usr/local/bin/
 ### From source
 
 ```sh
-go install github.com/<org>/2fa/cmd/2fa@latest
+go install github.com/<org>/2fa@latest
 ```
 
 Requires Go 1.27+.
@@ -98,13 +98,13 @@ make release         # goreleaser (linux/macOS/windows tarballs)
 
 ```sh
 # Linux from macOS
-GOOS=linux GOARCH=amd64 go build -o dist/2fa-linux ./cmd/2fa
+GOOS=linux GOARCH=amd64 go build -o dist/2fa-linux .
 
 # Windows from Linux
-GOOS=windows GOARCH=amd64 go build -o dist/2fa.exe ./cmd/2fa
+GOOS=windows GOARCH=amd64 go build -o dist/2fa.exe .
 
 # Native WebView GUI (Linux needs webkit2gtk-4.1-dev, macOS/Windows zero-deps)
-go build -tags=webview -o 2fa-gui ./cmd/2fa
+go build -tags=webview -o 2fa-gui .
 ```
 
 ## Platform notes

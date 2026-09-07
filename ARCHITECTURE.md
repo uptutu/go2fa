@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-cmd/2fa/                  entry point (cobra + flags)
+./ (root)             entry point — package main, cobra + flags
 internal/core/crypto/     Argon2id KDF + AES-256-GCM AEAD + .2fa container
 internal/core/totp/       RFC 6238 / RFC 4226 (self-contained, no deps)
 internal/core/vault/      SQLite store + Init/Unlock/Lock lifecycle

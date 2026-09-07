@@ -14,7 +14,7 @@ before:
 
 builds:
   - id: 2fa
-    main: ./cmd/2fa
+    main: ./
     binary: 2fa
     env:
       - CGO_ENABLED=0

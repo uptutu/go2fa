@@ -3,7 +3,7 @@
 # Common dev targets. CI / release use goreleaser (see .goreleaser.yaml).
 
 BINARY  := 2fa
-PKG     := ./cmd/2fa
+PKG     := .
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w
 

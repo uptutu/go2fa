@@ -9,42 +9,47 @@
   /* -------- Tokens -------- */
   :root {
     color-scheme: dark;
-    --bg: #0b1020;
-    --bg-elev: #131a33;
-    --bg-elev-2: #1a2244;
-    --surface: rgba(255,255,255,0.04);
-    --surface-2: rgba(255,255,255,0.08);
-    --border: rgba(255,255,255,0.10);
-    --border-strong: rgba(255,255,255,0.18);
-    --text: #e7ecf5;
-    --text-dim: #aab3c8;
-    --text-faint: #7d879c;
-    --accent: #7c9cff;
-    --accent-2: #5ec8ff;
+    --bg: #05070a;
+    --bg-elev: #0a0e13;
+    --bg-elev-2: #0e141b;
+    --surface: rgba(124,247,177,0.05);
+    --surface-2: rgba(124,247,177,0.11);
+    --border: rgba(124,247,177,0.14);
+    --border-strong: rgba(124,247,177,0.30);
+    --text: #d9f2e4;
+    --text-dim: #93b3a4;
+    --text-faint: #5e7a6c;
+    --accent: #7cf7b1;
+    --accent-2: #3ee6a8;
     --good: #4ade80;
     --warn: #facc15;
     --danger: #ff6b6b;
-    --code-bg: #0a1226;
+    --code-bg: #020604;
+    --glow: 0 0 18px rgba(124,247,177,0.22);
     --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
-    --radius: 12px;
-    --radius-sm: 8px;
-    --shadow: 0 10px 30px rgba(0,0,0,0.35);
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 10px 30px rgba(0,0,0,0.5);
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: light) {
     :root {
       color-scheme: light;
-      --bg: #f5f7fb;
+      --bg: #f2f7f4;
       --bg-elev: #ffffff;
-      --bg-elev-2: #fafbff;
-      --surface: rgba(0,0,0,0.03);
-      --surface-2: rgba(0,0,0,0.06);
-      --border: rgba(0,0,0,0.10);
-      --border-strong: rgba(0,0,0,0.18);
-      --text: #161b2b;
-      --text-dim: #4a546b;
-      --text-faint: #6b7589;
-      --code-bg: #ffffff;
-      --shadow: 0 6px 20px rgba(20,30,60,0.10);
+      --bg-elev-2: #f6faf7;
+      --surface: rgba(14,120,80,0.05);
+      --surface-2: rgba(14,120,80,0.10);
+      --border: rgba(14,120,80,0.16);
+      --border-strong: rgba(14,120,80,0.32);
+      --text: #0f231a;
+      --text-dim: #40604f;
+      --text-faint: #6d8578;
+      --accent: #0e9e63;
+      --accent-2: #0b7a4d;
+      --code-bg: #f4faf6;
+      --glow: 0 0 14px rgba(14,158,99,0.15);
+      --shadow: 0 6px 20px rgba(20,60,40,0.10);
     }
   }
 
@@ -56,15 +61,27 @@
     font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     color: var(--text);
     background:
-      radial-gradient(1200px 600px at 80% -10%, rgba(124,156,255,0.10), transparent 60%),
-      radial-gradient(900px 500px at -10% 110%, rgba(94,200,255,0.08), transparent 60%),
+      radial-gradient(1000px 500px at 85% -10%, rgba(124,247,177,0.07), transparent 60%),
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px),
       var(--bg);
+    background-size: auto, 44px 44px, 44px 44px, auto;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+  @media (prefers-color-scheme: light) {
+    body {
+      background:
+        radial-gradient(1000px 500px at 85% -10%, rgba(14,158,99,0.06), transparent 60%),
+        linear-gradient(rgba(14,120,80,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(14,120,80,0.05) 1px, transparent 1px),
+        var(--bg);
+      background-size: auto, 44px 44px, 44px 44px, auto;
+    }
+  }
   button { font: inherit; color: inherit; cursor: pointer; }
   input, select, textarea { font: inherit; color: inherit; }
-  ::selection { background: rgba(124,156,255,0.35); }
+  ::selection { background: rgba(124,247,177,0.30); }
   :focus-visible { outline: none; box-shadow: var(--focus); border-radius: 6px; }
 
   /* -------- Layout -------- */
@@ -104,11 +121,13 @@
     display: flex; align-items: center; gap: 8px;
   }
   header.top h1 .logo {
-    width: 22px; height: 22px;
-    border-radius: 6px;
+    width: 24px; height: 24px;
+    border-radius: 5px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: var(--glow);
     display: grid; place-items: center;
-    color: #0b1020;
+    color: #03130a;
+    font-family: var(--mono);
     font-weight: 800;
     font-size: 12px;
   }
@@ -212,7 +231,7 @@
     background: var(--surface);
     padding: 1px 6px; border-radius: 999px;
   }
-  .group-list li button[aria-pressed="true"] .count { background: rgba(124,156,255,0.18); color: var(--accent); }
+  .group-list li button[aria-pressed="true"] .count { background: rgba(124,247,177,0.16); color: var(--accent); }
   .side .add-group {
     margin-top: 8px;
     width: 100%;
@@ -255,7 +274,7 @@
   .btn.primary {
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     border-color: transparent;
-    color: #0b1020;
+    color: #03130a;
     font-weight: 600;
   }
   .btn.primary:hover { filter: brightness(1.05); }
@@ -264,7 +283,7 @@
   .btn.ghost:hover { color: var(--text); background: var(--surface); }
   .btn .count {
     font-size: 11px; line-height: 1;
-    background: rgba(124,156,255,0.18);
+    background: rgba(124,247,177,0.16);
     color: var(--accent);
     padding: 2px 6px;
     border-radius: 999px;
@@ -353,11 +372,13 @@
     display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
   }
   .code {
-    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 22px;
-    letter-spacing: 2px;
-    font-weight: 600;
+    font-family: var(--mono);
+    font-size: 24px;
+    letter-spacing: 4px;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    text-shadow: 0 0 14px rgba(124,247,177,0.35);
     background: var(--code-bg);
     border: 1px solid var(--border);
     padding: 6px 12px;
@@ -366,13 +387,17 @@
     user-select: all;
     min-width: 130px;
     text-align: center;
-    transition: background .15s, border-color .15s, color .15s;
+    transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
   }
-  .code:hover { border-color: var(--accent); }
+  .code:hover { border-color: var(--accent); box-shadow: var(--glow); }
+  @media (prefers-color-scheme: light) {
+    .code { text-shadow: none; color: var(--accent-2); }
+  }
   .code.copied {
     background: rgba(74,222,128,0.18);
     border-color: var(--good);
     color: var(--good);
+    text-shadow: none;
   }
   .code-hint { font-size: 11px; color: var(--text-faint); }
 
