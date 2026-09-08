@@ -90,6 +90,16 @@ const dict = {
     toast_export_done: 'Export downloaded',
     toast_export_failed: 'Export failed: {err}',
     err_export_password: 'Password required for .2fa export',
+    generate: 'Generate',
+    generate_title: 'Generate a random TOTP secret',
+    advanced: 'Advanced',
+    algorithm_label: 'Algorithm',
+    length_label: 'Length (bytes)',
+    qr_title: 'Scan with your phone',
+    qr_hint: "Point your phone's TOTP app at the code, or copy the URI and import it manually.",
+    qr_aria: 'Show QR code for {issuer}',
+    qr_copied: 'URI copied',
+    copy: 'Copy',
   },
   zh: {
     app_title: '2fa — TOTP 金库',
@@ -172,6 +182,16 @@ const dict = {
     toast_export_done: '已下载导出文件',
     toast_export_failed: '导出失败:{err}',
     err_export_password: '.2fa 导出需要密码',
+    generate: '生成',
+    generate_title: '随机生成一个 TOTP 密钥',
+    advanced: '高级',
+    algorithm_label: '算法',
+    length_label: '长度 (字节)',
+    qr_title: '用手机扫描',
+    qr_hint: '用手机 TOTP 应用扫描二维码,或复制 URI 手动导入。',
+    qr_aria: '显示 {issuer} 的二维码',
+    qr_copied: 'URI 已复制',
+    copy: '复制',
   },
 };
 
@@ -460,6 +480,9 @@ function renderSecrets() {
         <button class="code" type="button" title="${escapeHtml(t('copy_title_attr'))}" aria-label="${escapeHtml(t('code_aria', { digits, issuer: s.issuer }))}">${escapeHtml(codeFmt)}</button>
       </div>
       <div class="row-actions">
+        <button class="icon-btn qr-btn" type="button" data-id="${escapeHtml(s.id)}" aria-label="${escapeHtml(t('qr_aria', { issuer: s.issuer }))}" title="${escapeHtml(t('qr_title'))}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3z"/><path d="M20 14v3"/><path d="M14 20h3"/><path d="M20 20h1"/></svg>
+        </button>
         <button class="icon-btn edit" type="button" aria-label="${escapeHtml(t('edit_aria', { issuer: s.issuer }))}" title="${escapeHtml(t('edit_title_attr'))}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </button>
@@ -931,4 +954,126 @@ document.addEventListener('DOMContentLoaded', () => {
     sheenTarget = null;
     if (sheenRaf) { cancelAnimationFrame(sheenRaf); sheenRaf = 0; }
   });
+
+  /* -------- QR code for a secret --------
+   * Asks the backend for the canonical otpauth:// URI (the seed never leaves
+   * the server through the list endpoint, but this single-secret endpoint
+   * re-emits the URI the user could already reconstruct from /api/export).
+   * Renders the URI as a QR via the qrcode-generator library loaded before
+   * this script.
+   */
+  const qrScrim = $('#qr-dialog');
+
+  async function fetchOtpauthURI(id) {
+    const res = await api(`/api/secrets/${encodeURIComponent(id)}/otpauth`);
+    return res.uri;
+  }
+
+  function renderQRInto(svgContainer, data) {
+    // qrcode-generator API: qrcode(typeNumber, errorCorrectionLevel)
+    // typeNumber=0 means auto-detect smallest size that fits.
+    const qr = qrcode(0, 'M');
+    qr.addData(data);
+    qr.make();
+    svgContainer.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true });
+  }
+
+  async function openQR(secret) {
+    if (!secret || !secret.id) { toast('Missing secret', 'bad'); return; }
+    let uri;
+    try { uri = await fetchOtpauthURI(secret.id); }
+    catch (e) { toast(t('toast_load_failed', { err: e.message || e }), 'bad'); return; }
+    const canvas = $('#qr-canvas');
+    renderQRInto(canvas, uri);
+    $('#qr-issuer').textContent = secret.issuer + (secret.account ? ' · ' + secret.account : '');
+    const uriEl = $('#qr-uri');
+    uriEl.textContent = uri;
+    uriEl.dataset.uri = uri;
+    showScrim(qrScrim);
+  }
+
+  // Copy button inside QR dialog
+  $('#qr-copy').addEventListener('click', async () => {
+    const uri = $('#qr-uri').dataset.uri || '';
+    if (!uri) return;
+    try {
+      await navigator.clipboard.writeText(uri);
+      toast(t('qr_copied'), 'good');
+    } catch (e) {
+      toast(t('toast_copy_failed', { err: e.message || e }), 'bad');
+    }
+  });
+  // Close handlers
+  $$('#qr-dialog [data-close]').forEach((b) => b.addEventListener('click', () => hideScrim(qrScrim)));
+  // Click outside dialog content
+  qrScrim.addEventListener('mousedown', (e) => { if (e.target === qrScrim) hideScrim(qrScrim); });
+  // Extend Esc handler to also close the QR dialog (in addition to the existing
+  // ones handled by escClose). Single keydown listener on document.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!qrScrim.hidden && qrScrim.classList.contains('show')) hideScrim(qrScrim);
+  });
+
+  // QR button click delegation (handles both already-rendered and future rows)
+  secretsUl.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.qr-btn');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const s = state.secrets.find((x) => x.id === id);
+    if (s) openQR(s);
+  });
+
+  /* -------- Generate a random TOTP secret (client-side) --------
+   * Uses crypto.getRandomValues for CSPRNG. base32 alphabet matches
+   * Go's base32.StdEncoding: A-Z + 2-7, no padding. Test vector:
+   *   encode([0x31,0x32,...,0x39,0x30]) (ASCII "12345678901234567890")
+   *     = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  (32 chars, RFC 4648)
+   * which matches internal/core/totp/totp_test.go:10 and totp.go:85.
+   */
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+  function base32Encode(bytes) {
+    let bits = 0, value = 0, out = '';
+    for (let i = 0; i < bytes.length; i++) {
+      value = (value << 8) | bytes[i];
+      bits += 8;
+      while (bits >= 5) {
+        out += B32[(value >>> (bits - 5)) & 31];
+        bits -= 5;
+      }
+    }
+    if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+    return out;
+  }
+
+  function generateSecret(bytes) {
+    const buf = new Uint8Array(bytes);
+    crypto.getRandomValues(buf);
+    return base32Encode(buf);
+  }
+
+  function generateTOTP({ algo = 'SHA1', bytes = 20 } = {}) {
+    return { secret: generateSecret(bytes), algorithm: algo, digits: 6, period: 30 };
+  }
+
+  // Generate button: fill the secret input with a fresh key.
+  // Algorithm + length come from the Advanced <details> selects.
+  $('#gen-btn').addEventListener('click', () => {
+    const algo = ($('#gen-algo')?.value) || 'SHA1';
+    const bytes = Number(($('#gen-bytes')?.value) || 20);
+    const { secret } = generateTOTP({ algo, bytes });
+    $('#secret').value = secret;
+    $('#secret').focus();
+    $('#secret').select();
+  });
+
+  // Self-test: RFC 4648 §10 test vector for base32. If the alphabet or bit
+  // shifting drifts, this catches it at load time before the user does.
+  // "12345678901234567890" (20 bytes) -> "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+  (function selfTest() {
+    const ascii = new TextEncoder().encode('12345678901234567890');
+    const got = base32Encode(ascii);
+    const want = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+    if (got !== want) console.error('base32 self-test FAILED: got', got, 'want', want);
+  })();
 });

@@ -737,6 +737,81 @@
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
   }
+  /* Manual-add secret input + Generate button share a row */
+  .secret-row {
+    display: flex; gap: 8px; align-items: stretch;
+  }
+  .secret-row > input { flex: 1; min-width: 0; }
+  .secret-row > .btn { flex-shrink: 0; }
+  /* Advanced section inside manual-add */
+  .advanced {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, black 14%, transparent), color-mix(in srgb, black 6%, transparent));
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .advanced[open] { border-color: var(--border-strong); }
+  .advanced > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 9px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    user-select: none;
+    transition: color .15s, background .15s;
+  }
+  .advanced > summary::-webkit-details-marker { display: none; }
+  .advanced > summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform .2s;
+    color: var(--text-faint);
+  }
+  .advanced[open] > summary::before { transform: rotate(90deg); }
+  .advanced > summary:hover { color: var(--text); background: var(--glass); }
+  .advanced > .grid-2 { padding: 4px 12px 12px; }
+  .advanced .field label { font-size: 11px; }
+
+  /* QR dialog */
+  .qr-dialog { width: min(440px, calc(100vw - 32px)); }
+  .qr-body {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    padding: 22px 22px 24px;
+  }
+  .qr-canvas {
+    width: min(320px, 70vw);
+    aspect-ratio: 1 / 1;
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px;
+    display: grid; place-items: center;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.5),
+      0 18px 40px -12px rgba(0,0,0,0.55),
+      0 0 0 1px color-mix(in srgb, var(--accent) 18%, var(--border));
+  }
+  .qr-canvas svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .qr-canvas svg rect { fill: #000 !important; }
+  .qr-canvas svg rect[fill="white"], .qr-canvas svg path[fill="white"] { fill: #fff !important; }
+  .qr-meta { width: 100%; display: flex; flex-direction: column; gap: 10px; align-items: stretch; text-align: center; }
+  .qr-issuer { font-size: 14px; font-weight: 600; color: var(--text); }
+  .qr-uri-wrap { display: flex; align-items: center; gap: 6px; }
+  .qr-uri {
+    flex: 1; min-width: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 9px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: left;
+  }
+  .qr-hint { margin: 0; font-size: 11px; color: var(--text-faint); }
   @media (prefers-color-scheme: light) {
     .field input, .field select, .field textarea {
       background: linear-gradient(180deg, color-mix(in srgb, white 60%, transparent), color-mix(in srgb, white 78%, transparent));
@@ -891,7 +966,24 @@
 
       <section id="panel-manual" hidden class="field" style="gap:12px">
         <input id="issuer" type="text" autocomplete="off" data-i18n-placeholder="name_placeholder">
-        <input id="secret" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="secret_placeholder">
+        <div class="secret-row">
+          <input id="secret" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="secret_placeholder">
+          <button id="gen-btn" class="btn" type="button" data-i18n-title="generate_title" title="Generate a random TOTP secret">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+            <span data-i18n="generate">Generate</span>
+          </button>
+        </div>
+        <details class="advanced">
+          <summary data-i18n="advanced">Advanced</summary>
+          <div class="grid-2">
+            <div class="field"><label for="gen-algo" data-i18n="algorithm_label">Algorithm</label>
+              <select id="gen-algo"><option value="SHA1">SHA-1</option><option value="SHA256">SHA-256</option><option value="SHA512">SHA-512</option></select>
+            </div>
+            <div class="field"><label for="gen-bytes" data-i18n="length_label">Length (bytes)</label>
+              <select id="gen-bytes"><option value="20">160 bit (recommended)</option><option value="32">256 bit</option><option value="40">320 bit</option></select>
+            </div>
+          </div>
+        </details>
       </section>
 
       <div id="dialog-err" class="err" role="alert" aria-live="polite"></div>
@@ -1000,6 +1092,33 @@
 
 <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
+<!-- QR dialog (show otpauth:// URI as a QR for phone scanning) -->
+<div id="qr-dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="qr-title" hidden>
+  <div class="dialog qr-dialog">
+    <header>
+      <h2 id="qr-title" data-i18n="qr_title">Scan with your phone</h2>
+      <button class="icon-btn close" type="button" data-i18n-aria="close_aria" data-close>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="body qr-body">
+      <div id="qr-canvas" class="qr-canvas" aria-hidden="true"></div>
+      <div class="qr-meta">
+        <div class="qr-issuer" id="qr-issuer"></div>
+        <div class="qr-uri-wrap">
+          <code id="qr-uri" class="qr-uri" tabindex="0"></code>
+          <button id="qr-copy" class="btn ghost" type="button" data-i18n-title="copy_title_attr" title="Click to copy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span data-i18n="copy">Copy</span>
+          </button>
+        </div>
+        <p class="qr-hint" data-i18n="qr_hint">Point your phone's TOTP app at the code, or copy the URI and import it manually.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="qrcode.min.js"></script>
 <script src="app.js"></script>
 <script src="jsqr.min.js"></script>
 </body>

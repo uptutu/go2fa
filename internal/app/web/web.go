@@ -340,6 +340,11 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	// Sub-resource: /api/secrets/{id}/otpauth — render canonical otpauth:// URI for QR.
+	if strings.HasSuffix(r.URL.Path, "/otpauth") {
+		s.handleSecretOtpauth(w, r)
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/secrets/")
 	if id == "" {
 		s.writeErr(w, http.StatusBadRequest, "missing id")
@@ -444,6 +449,40 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleSecretOtpauth returns the canonical otpauth:// URI for a single secret.
+// Used by the web UI to render a QR code so users can scan it with their phone.
+// Gated by the same auth token as the rest of the /api surface. The seed lives
+// inside the URI itself; the user already authorized viewing the secret when
+// they could see it in the list, so this is the same trust boundary.
+func (s *Server) handleSecretOtpauth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/secrets/")
+	id = strings.TrimSuffix(id, "/otpauth")
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		s.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sec, err := s.v.GetSecret(r.Context(), uid)
+	if err != nil {
+		s.notFoundOrInternalErr(w, r, err, "not found")
+		return
+	}
+	uri := otpauth.URI{
+		Type:      otpauth.TOTP,
+		Issuer:    sec.Issuer,
+		Account:   sec.Account,
+		Secret:    sec.SecretRaw,
+		Algorithm: sec.Algorithm,
+		Digits:    sec.Digits,
+		Period:    sec.Period,
+	}
+	s.writeJSON(w, map[string]string{"uri": uri.String()})
 }
 
 func (s *Server) handleCode(w http.ResponseWriter, r *http.Request) {

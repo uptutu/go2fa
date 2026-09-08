@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptutu/go2fa/internal/core/otpauth"
 	"github.com/uptutu/go2fa/internal/core/totp"
 	"github.com/uptutu/go2fa/internal/core/vault"
 )
@@ -399,5 +400,62 @@ func TestAPIPatchGroup(t *testing.T) {
 	res.Body.Close()
 	if gs[0].Name != "Job" || gs[0].Color != "#7c3aed" {
 		t.Errorf("after patch: %+v", gs[0])
+	}
+}
+
+func TestAPISecretOtpauth(t *testing.T) {
+	srv := newTestServer(t)
+	uri := "otpauth://totp/GitHub:me@example.com?secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&period=30"
+	res, err := http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
+		bytes.NewBufferString(`{"uri":"`+uri+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("POST status %d: %s", res.StatusCode, b)
+	}
+	res.Body.Close()
+
+	// List secrets and pick the real ID (POST returns zero-UUID because
+	// Store.UpsertSecret takes Secret by value).
+	res, err = http.Get("http://" + srv.Addr() + "/api/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list []secretJSON
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(list) == 0 {
+		t.Fatal("no secrets in list")
+	}
+	id := list[0].ID
+
+	// Fetch the otpauth URI for the new secret
+	res, err = http.Get("http://" + srv.Addr() + "/api/secrets/" + id + "/otpauth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d: %s", res.StatusCode, b)
+	}
+	var body struct{ URI string }
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.URI == "" {
+		t.Fatal("empty uri")
+	}
+	// Round-trip: parse the emitted URI; should yield a non-empty secret.
+	parsed, err := otpauth.Parse(body.URI)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Secret) == 0 {
+		t.Fatal("no secret in re-parsed URI")
 	}
 }
