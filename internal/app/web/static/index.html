@@ -10,12 +10,24 @@
   :root {
     color-scheme: dark;
     --bg: #06080c;
-    --glass: rgba(255,255,255,0.055);
-    --glass-2: rgba(255,255,255,0.10);
-    --border: rgba(255,255,255,0.10);
-    --border-strong: rgba(255,255,255,0.22);
-    --topline: inset 0 1px 0 rgba(255,255,255,0.09);
-    --dialog-bg: rgba(13,17,16,0.78);
+    /* Liquid glass base tint — slightly cool, very low alpha so background blobs bleed through */
+    --glass: rgba(255,255,255,0.06);
+    --glass-2: rgba(255,255,255,0.12);
+    /* Edge highlights — wider gradient stroke, more luminous */
+    --border: rgba(255,255,255,0.14);
+    --border-strong: rgba(255,255,255,0.28);
+    /* Specular top highlight: brighter & taller to read as a real rim light */
+    --topline: inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.18);
+    /* Refraction ring — conic gradient drives the prism halo */
+    --refract:
+      conic-gradient(from calc(var(--mx,50%) * 1deg) at calc(var(--mx,50%)) calc(var(--my,30%)),
+        rgba(255,255,255,0) 0deg,
+        rgba(255,255,255,0.18) 30deg,
+        rgba(255,255,255,0) 60deg,
+        rgba(255,255,255,0) 300deg,
+        rgba(255,255,255,0.14) 330deg,
+        rgba(255,255,255,0) 360deg);
+    --dialog-bg: rgba(13,17,16,0.62);
     --text: #eef4f0;
     --text-dim: #a7b6ae;
     --text-faint: #6f8078;
@@ -24,29 +36,57 @@
     --good: #4ade80;
     --warn: #facc15;
     --danger: #ff6b6b;
-    --radius: 18px;
-    --radius-sm: 12px;
-    --shadow: 0 20px 50px rgba(0,0,0,0.45);
-    --blur: blur(22px) saturate(160%);
+    --radius: 22px;
+    --radius-sm: 14px;
+    /* Liquid shadow: tighter, more colored (mint glow underneath) */
+    --shadow:
+      0 1px 0 rgba(255,255,255,0.06) inset,
+      0 24px 48px -12px rgba(0,0,0,0.55),
+      0 8px 20px -8px rgba(124,247,177,0.10);
+    --shadow-lg:
+      0 1px 0 rgba(255,255,255,0.10) inset,
+      0 40px 80px -20px rgba(0,0,0,0.65),
+      0 16px 40px -16px rgba(77,217,255,0.20);
+    /* Two-stage blur: strong + saturate. Edge gets an additional tighter blur for the frosted rim */
+    --blur: blur(28px) saturate(180%);
+    --blur-rim: blur(8px);
     --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
     --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+    /* Default pointer vars — set per-element by JS, used by ::after sheen */
+    --mx: 50%;
+    --my: 30%;
   }
   @media (prefers-color-scheme: light) {
     :root {
       color-scheme: light;
-      --bg: #e6ecea;
+      --bg: #dde6e1;
       --glass: rgba(255,255,255,0.55);
       --glass-2: rgba(255,255,255,0.78);
-      --border: rgba(20,40,32,0.10);
-      --border-strong: rgba(20,40,32,0.22);
-      --topline: inset 0 1px 0 rgba(255,255,255,0.7);
-      --dialog-bg: rgba(255,255,255,0.82);
-      --text: #12211a;
+      --border: rgba(20,40,32,0.12);
+      --border-strong: rgba(20,40,32,0.24);
+      --topline: inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(20,40,32,0.08);
+      --refract:
+        conic-gradient(from calc(var(--mx,50%) * 1deg) at calc(var(--mx,50%)) calc(var(--my,30%)),
+          rgba(255,255,255,0) 0deg,
+          rgba(255,255,255,0.45) 30deg,
+          rgba(255,255,255,0) 60deg,
+          rgba(255,255,255,0) 300deg,
+          rgba(255,255,255,0.40) 330deg,
+          rgba(255,255,255,0) 360deg);
+      --dialog-bg: rgba(255,255,255,0.72);
+      --text: #0f1d16;
       --text-dim: #46594f;
       --text-faint: #75867d;
       --accent: #0e9e63;
       --accent-2: #0b7a4d;
-      --shadow: 0 16px 40px rgba(30,60,45,0.14);
+      --shadow:
+        0 1px 0 rgba(255,255,255,0.85) inset,
+        0 24px 48px -16px rgba(30,60,45,0.22),
+        0 8px 20px -10px rgba(14,158,99,0.14);
+      --shadow-lg:
+        0 1px 0 rgba(255,255,255,0.95) inset,
+        0 40px 80px -24px rgba(30,60,45,0.30),
+        0 16px 40px -20px rgba(14,158,99,0.20);
     }
   }
 
@@ -68,7 +108,15 @@
   [hidden] { display: none !important; } /* custom display on .empty/.secrets/.scrim/.btn otherwise beats the UA default */
 
   /* -------- Ambient background (what the glass blurs) -------- */
-  .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+  /* Slight darkening overlay so the glass has something dark to refract; raises contrast on light scheme too */
+  .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--bg); }
+  .bg::after {
+    /* Grain — extremely faint, sells the material as physical glass */
+    content: ""; position: absolute; inset: 0; opacity: .04;
+    background-image: radial-gradient(rgba(255,255,255,0.6) 1px, transparent 1px);
+    background-size: 3px 3px;
+    pointer-events: none; mix-blend-mode: overlay;
+  }
   .blob {
     position: absolute;
     border-radius: 50%;
@@ -94,20 +142,138 @@
   @keyframes drift1 { to { transform: translate(130px, 70px) scale(1.15); } }
   @keyframes drift2 { to { transform: translate(-150px, 90px) scale(0.88); } }
 
-  /* -------- Glass recipe -------- */
-  .glass {
+  /* -------- Glass recipe (the liquid glass base) -------- */
+  /*
+   * Three layers stacked on the same box:
+   *   1. the .glass element itself — base tint + strong backdrop blur
+   *   2. ::before — refraction halo (conic gradient clipped to a wide rounded mask,
+   *      then masked to a thin inner ring so only the rim glows)
+   *   3. ::after  — specular sheen that follows --mx/--my set by JS on pointermove
+   */
+  .glass,
+  .chip,
+  .btn,
+  .secret,
+  .dialog,
+  .toast,
+  .search,
+  .lang-switch,
+  .status,
+  .empty {
+    position: relative;
+    isolation: isolate; /* keep pseudo layers inside the rounded clip */
+  }
+  .glass,
+  .chip,
+  .btn,
+  .secret,
+  .dialog,
+  .toast,
+  .search,
+  .lang-switch,
+  .status,
+  .empty {
     background: var(--glass);
     backdrop-filter: var(--blur);
     -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--border);
     box-shadow: var(--topline);
   }
+  /* Apply liquid treatment to anything tagged .glass or the listed native glass surfaces */
+  .glass,
+  .chip,
+  .btn,
+  .secret,
+  .dialog,
+  .toast,
+  .search,
+  .lang-switch,
+  .status,
+  .empty {
+    box-shadow: var(--topline), var(--shadow);
+    transition: transform .25s cubic-bezier(.2,.8,.2,1),
+                border-color .2s,
+                background .2s,
+                box-shadow .25s;
+  }
+  /* Refraction halo — sits behind the content, hugs the edge */
+  .glass::before,
+  .chip::before,
+  .btn::before,
+  .secret::before,
+  .dialog::before,
+  .toast::before,
+  .search::before,
+  .lang-switch::before,
+  .status::before,
+  .empty::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: var(--refract);
+    /* Mask: only the rim shines; everything inside becomes transparent.
+       Two radial masks layered: a wide ring (rim glow) + a tiny inner bright spot at the cursor. */
+    -webkit-mask:
+      radial-gradient(farthest-side at var(--mx,50%) var(--my,30%),
+        transparent calc(100% - 14px), rgba(0,0,0,.85) calc(100% - 13px),
+        rgba(0,0,0,.85) 100%);
+            mask:
+      radial-gradient(farthest-side at var(--mx,50%) var(--my,30%),
+        transparent calc(100% - 14px), rgba(0,0,0,.85) calc(100% - 13px),
+        rgba(0,0,0,.85) 100%);
+    opacity: .55;
+    pointer-events: none;
+    z-index: -1;
+    mix-blend-mode: screen;
+  }
+  /* Specular sheen — a soft bright blob that follows the pointer */
+  .glass::after,
+  .chip::after,
+  .btn::after,
+  .secret::after,
+  .dialog::after,
+  .toast::after,
+  .search::after,
+  .lang-switch::after,
+  .status::after,
+  .empty::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(180px circle at var(--mx,50%) var(--my,30%),
+      rgba(255,255,255,0.22), rgba(255,255,255,0.06) 40%, transparent 70%);
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
+    transition: opacity .25s;
+    mix-blend-mode: screen;
+  }
+  /* Hover & active states surface the sheen and lift the surface */
+  .glass:hover::after,
+  .chip:hover::after,
+  .btn:hover::after,
+  .secret:hover::after,
+  .dialog:hover::after,
+  .toast:hover::after,
+  .search:hover::after,
+  .lang-switch:hover::after,
+  .status:hover::after,
+  .empty:hover::after,
+  .glass:focus-within::after,
+  .secret:focus-within::after,
+  .search:focus-within::after,
+  .lang-switch:focus-within::after,
+  .btn:focus-visible::after {
+    opacity: 1;
+  }
 
   /* -------- Layout -------- */
   .app {
     max-width: 860px;
     margin: 0 auto;
-    padding: 16px 18px 64px;
+    padding: 18px 18px 64px;
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -115,12 +281,12 @@
   }
 
   header.top {
-    position: sticky; top: 12px; z-index: 10;
+    position: sticky; top: 14px; z-index: 10;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 14px;
-    border-radius: 20px;
+    padding: 11px 14px;
+    border-radius: 26px;
     flex-wrap: wrap;
   }
   header.top h1 {
@@ -132,10 +298,13 @@
     white-space: nowrap;
   }
   header.top h1 .logo {
-    width: 26px; height: 26px;
-    border-radius: 8px;
+    width: 28px; height: 28px;
+    border-radius: 9px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    box-shadow: 0 0 16px rgba(124,247,177,0.35);
+    box-shadow:
+      0 0 20px rgba(124,247,177,0.45),
+      inset 0 1px 0 rgba(255,255,255,0.55),
+      inset 0 -1px 0 rgba(0,0,0,0.18);
     display: grid; place-items: center;
     color: #03130a;
     font-family: var(--mono);
@@ -146,13 +315,17 @@
     flex: 1;
     min-width: 160px;
     display: flex; align-items: center; gap: 7px;
-    padding: 7px 13px;
+    padding: 8px 14px;
     border-radius: 999px;
     background: var(--glass);
     border: 1px solid var(--border);
-    transition: border-color .15s, background .15s;
+    transition: border-color .2s, background .2s, box-shadow .2s;
   }
-  .search:focus-within { border-color: var(--border-strong); background: var(--glass-2); }
+  .search:focus-within {
+    border-color: var(--border-strong);
+    background: var(--glass-2);
+    box-shadow: var(--topline), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
   .search input {
     background: transparent; border: 0; outline: 0;
     color: var(--text);
@@ -165,7 +338,7 @@
   /* status: dot + short label only */
   .status {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 11px;
+    padding: 6px 12px;
     font-size: 12px;
     color: var(--text-dim);
     border-radius: 999px;
@@ -174,10 +347,14 @@
     white-space: nowrap;
   }
   .status .addr { display: none; }
-  .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
-  .status.unlocked .dot { background: var(--good); box-shadow: 0 0 8px var(--good); }
-  .status.locked .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
-  .status.error .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+  .status .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-faint);
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 8%, transparent);
+  }
+  .status.unlocked .dot { background: var(--good); box-shadow: 0 0 10px var(--good), 0 0 0 3px color-mix(in srgb, var(--good) 18%, transparent); }
+  .status.locked .dot { background: var(--warn); box-shadow: 0 0 10px var(--warn), 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent); }
+  .status.error .dot { background: var(--danger); box-shadow: 0 0 10px var(--danger), 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
 
   /* -------- Lang switch -------- */
   .lang-switch {
@@ -191,30 +368,32 @@
   .lang-switch button {
     background: transparent;
     border: 0;
-    padding: 5px 11px;
+    padding: 6px 12px;
     font-size: 12px;
     color: var(--text-dim);
-    transition: background .15s, color .15s;
+    transition: background .2s, color .2s, box-shadow .2s;
+    position: relative;
   }
   .lang-switch button:hover { color: var(--text); }
   .lang-switch button[aria-pressed="true"] {
     background: var(--glass-2);
     color: var(--text);
     font-weight: 600;
+    box-shadow: var(--topline);
   }
 
   /* -------- Group chips (replaces sidebar) -------- */
   .chips {
     display: flex; align-items: center; gap: 8px;
     overflow-x: auto;
-    padding: 2px;
+    padding: 4px;
     scrollbar-width: none;
   }
   .chips::-webkit-scrollbar { display: none; }
   .chip-row { display: flex; gap: 8px; }
   .chip {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 7px 14px;
+    padding: 8px 14px;
     border-radius: 999px;
     background: var(--glass);
     backdrop-filter: var(--blur);
@@ -224,17 +403,24 @@
     color: var(--text-dim);
     font-size: 13px;
     white-space: nowrap;
-    transition: color .15s, border-color .15s, background .15s, transform .15s;
+    transition: color .2s, border-color .2s, background .2s, transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s;
   }
-  .chip:hover { color: var(--text); border-color: var(--border-strong); transform: translateY(-1px); }
+  .chip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--topline), 0 8px 18px -8px rgba(124,247,177,0.22);
+  }
   .chip[aria-pressed="true"] {
     color: var(--text);
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 13%, var(--glass));
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 14%, var(--glass));
+    box-shadow: var(--topline), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent) inset, 0 6px 18px -6px color-mix(in srgb, var(--accent) 35%, transparent);
   }
   .chip .swatch {
     width: 9px; height: 9px; border-radius: 50%;
     background: var(--text-faint); flex-shrink: 0;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 12%, transparent);
   }
   .chip .count {
     font-size: 11px;
@@ -254,7 +440,7 @@
   }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 14px;
+    padding: 9px 15px;
     border-radius: 999px;
     background: var(--glass);
     backdrop-filter: var(--blur);
@@ -262,27 +448,49 @@
     border: 1px solid var(--border);
     box-shadow: var(--topline);
     color: var(--text);
-    transition: background .15s, border-color .15s, transform .15s;
+    transition: background .2s, border-color .2s, transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s, filter .2s;
   }
-  .btn:hover { background: var(--glass-2); border-color: var(--border-strong); transform: translateY(-1px); }
+  .btn:hover {
+    background: var(--glass-2);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--topline), 0 8px 18px -8px rgba(0,0,0,0.35);
+  }
   .btn:active { transform: translateY(0); }
   .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
   .btn.primary {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2));
-    border-color: transparent;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--accent) 92%, white 8%), color-mix(in srgb, var(--accent-2) 88%, white 4%));
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
     color: #03130a;
     font-weight: 650;
-    box-shadow: 0 4px 18px rgba(124,247,177,0.28);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.55),
+      inset 0 -1px 0 rgba(0,0,0,0.18),
+      0 6px 22px -4px color-mix(in srgb, var(--accent) 55%, transparent);
   }
-  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.primary:hover {
+    filter: brightness(1.06) saturate(1.05);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.65),
+      0 10px 26px -4px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
   .btn.danger { color: var(--danger); }
-  .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-dim); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .btn.ghost:hover { color: var(--text); background: var(--glass); }
+  .btn.ghost {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--text-dim);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .btn.ghost:hover { color: var(--text); background: var(--glass); box-shadow: var(--topline); }
   .btn .count {
     font-size: 11px; line-height: 1;
-    background: rgba(124,247,177,0.16);
+    background: rgba(124,247,177,0.18);
     color: var(--accent);
-    padding: 2px 6px;
+    padding: 2px 7px;
     border-radius: 999px;
     margin-left: 2px;
   }
@@ -290,16 +498,17 @@
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 12px; color: var(--text-dim);
     cursor: pointer; user-select: none;
-    padding: 4px 8px; border-radius: var(--radius-sm);
+    padding: 5px 9px; border-radius: var(--radius-sm);
+    transition: background .15s, color .15s;
   }
-  .check:hover { color: var(--text); }
+  .check:hover { color: var(--text); background: var(--glass); }
   .check input { accent-color: var(--accent); }
 
   /* selection checkbox: hidden until hover or selection mode */
   .pick {
     display: grid; place-items: center; cursor: pointer;
     opacity: 0;
-    transition: opacity .15s;
+    transition: opacity .2s;
   }
   .secret:hover .pick,
   .secret:focus-within .pick,
@@ -325,15 +534,22 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--topline);
-    transition: transform .18s, border-color .18s, background .18s;
+    transition: transform .25s cubic-bezier(.2,.8,.2,1), border-color .2s, background .2s, box-shadow .25s;
   }
   .secret:hover {
     transform: translateY(-2px);
     border-color: var(--border-strong);
     background: var(--glass-2);
+    box-shadow: var(--topline), 0 14px 28px -10px rgba(0,0,0,0.45), 0 4px 14px -8px rgba(124,247,177,0.18);
   }
-  .secret.expiring { border-color: rgba(250,204,21,0.45); }
-  .secret.expired { border-color: rgba(255,107,107,0.45); }
+  .secret.expiring {
+    border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+    box-shadow: var(--topline), 0 0 0 1px color-mix(in srgb, var(--warn) 14%, transparent) inset;
+  }
+  .secret.expired {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+    box-shadow: var(--topline), 0 0 0 1px color-mix(in srgb, var(--danger) 14%, transparent) inset;
+  }
 
   .ring { position: relative; width: 40px; height: 40px; }
   .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
@@ -385,27 +601,34 @@
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     color: var(--accent);
-    background: rgba(0,0,0,0.28);
-    border: 1px solid var(--border);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 4%, transparent));
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
     padding: 7px 14px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     user-select: all;
     min-width: 128px;
     text-align: center;
-    transition: border-color .15s, box-shadow .15s, background .15s, color .15s;
+    transition: border-color .2s, box-shadow .2s, background .2s, color .2s, transform .15s;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   @media (prefers-color-scheme: light) {
-    .code { background: rgba(255,255,255,0.65); }
+    .code { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, white), color-mix(in srgb, var(--accent) 3%, white)); }
   }
   .code:hover {
     border-color: var(--accent);
-    box-shadow: 0 0 22px rgba(124,247,177,0.22);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+      0 0 28px color-mix(in srgb, var(--accent) 30%, transparent);
   }
   .code.copied {
-    background: rgba(74,222,128,0.18);
+    background: color-mix(in srgb, var(--good) 22%, transparent);
     border-color: var(--good);
     color: var(--good);
+    text-shadow: 0 0 18px color-mix(in srgb, var(--good) 55%, transparent);
   }
 
   .row-actions { display: flex; gap: 4px; }
@@ -416,9 +639,14 @@
     border: 1px solid transparent;
     border-radius: 10px;
     color: var(--text-dim);
-    transition: background .15s, color .15s, border-color .15s;
+    transition: background .2s, color .2s, border-color .2s, transform .15s;
   }
-  .icon-btn:hover { background: var(--glass-2); color: var(--text); border-color: var(--border); }
+  .icon-btn:hover {
+    background: var(--glass-2);
+    color: var(--text);
+    border-color: var(--border);
+    box-shadow: var(--topline);
+  }
   .icon-btn svg { width: 16px; height: 16px; }
 
   @media (max-width: 640px) {
@@ -438,28 +666,35 @@
     border-radius: var(--radius);
   }
   .empty .glyph {
-    width: 58px; height: 58px;
-    border-radius: 18px;
-    background: var(--glass-2);
-    border: 1px solid var(--border);
+    width: 62px; height: 62px;
+    border-radius: 20px;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent-2) 8%, transparent));
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
     display: grid; place-items: center;
-    color: var(--text-dim);
+    color: var(--accent);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.20),
+      0 0 28px -6px color-mix(in srgb, var(--accent) 35%, transparent);
   }
-  .empty .glyph svg { width: 28px; height: 28px; }
+  .empty .glyph svg { width: 30px; height: 30px; }
   .empty h3 { margin: 0; color: var(--text); font-size: 16px; font-weight: 600; }
   .empty p { margin: 0; max-width: 380px; }
 
   /* -------- Modal -------- */
   .scrim {
     position: fixed; inset: 0;
-    background: rgba(4,6,10,0.5);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: rgba(4,6,10,0.45);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
     display: grid; place-items: center;
     z-index: 100;
     opacity: 0;
     pointer-events: none;
-    transition: opacity .18s;
+    transition: opacity .22s;
+  }
+  @media (prefers-color-scheme: light) {
+    .scrim { background: rgba(220,230,225,0.35); }
   }
   .scrim.show { opacity: 1; pointer-events: auto; }
   .dialog {
@@ -470,39 +705,48 @@
     backdrop-filter: var(--blur);
     -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--border-strong);
-    border-radius: 22px;
-    box-shadow: var(--topline), var(--shadow);
-    transform: translateY(10px) scale(0.97);
-    transition: transform .18s;
+    border-radius: 24px;
+    box-shadow: var(--topline), var(--shadow-lg);
+    transform: translateY(14px) scale(0.96);
+    transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s;
   }
   .scrim.show .dialog { transform: none; }
   .dialog header {
     display: flex; align-items: center; gap: 10px;
-    padding: 15px 20px;
+    padding: 16px 20px;
     border-bottom: 1px solid var(--border);
   }
-  .dialog header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  .dialog header h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .1px; }
   .dialog header .close { margin-left: auto; }
   .dialog .body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
   .dialog footer {
     display: flex; justify-content: flex-end; gap: 8px;
-    padding: 13px 20px;
+    padding: 14px 20px;
     border-top: 1px solid var(--border);
   }
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
   .field input, .field select, .field textarea {
-    background: rgba(0,0,0,0.22);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, black 24%, transparent), color-mix(in srgb, black 12%, transparent));
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 9px 11px;
+    padding: 10px 12px;
     color: var(--text);
-    transition: border-color .15s;
+    transition: border-color .2s, box-shadow .2s, background .2s;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
   }
   @media (prefers-color-scheme: light) {
-    .field input, .field select, .field textarea { background: rgba(255,255,255,0.6); }
+    .field input, .field select, .field textarea {
+      background: linear-gradient(180deg, color-mix(in srgb, white 60%, transparent), color-mix(in srgb, white 78%, transparent));
+    }
   }
-  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--accent);
+    outline: 0;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
   .field .help { font-size: 11px; color: var(--text-faint); }
   .field .err, .err { font-size: 12px; color: var(--danger); min-height: 16px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -510,26 +754,30 @@
 
   /* -------- Scanner -------- */
   .scanner {
-    border: 1px dashed var(--border-strong);
+    border: 1px dashed color-mix(in srgb, var(--accent-2) 55%, var(--border-strong));
     border-radius: var(--radius);
     padding: 8px;
-    background: #000;
+    background:
+      radial-gradient(circle at center, color-mix(in srgb, var(--accent-2) 6%, #000), #000);
     aspect-ratio: 4 / 3;
     display: grid; place-items: center;
     overflow: hidden;
     position: relative;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.6);
   }
   .scanner video { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
   .scanner .hint {
     position: absolute; left: 0; right: 0; bottom: 8px;
     text-align: center; font-size: 12px; color: #fff;
-    background: rgba(0,0,0,0.4);
-    padding: 4px;
+    background: linear-gradient(180deg, transparent, rgba(0,0,0,0.55));
+    padding: 8px 4px 4px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
   }
 
   /* -------- Toast -------- */
   .toasts {
-    position: fixed; bottom: 18px; right: 18px;
+    position: fixed; bottom: 20px; right: 20px;
     display: flex; flex-direction: column; gap: 8px;
     z-index: 200;
   }
@@ -539,21 +787,21 @@
     backdrop-filter: var(--blur);
     -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--border-strong);
-    border-radius: 14px;
-    box-shadow: var(--shadow);
+    border-radius: 16px;
+    box-shadow: var(--shadow-lg);
     font-size: 13px;
     color: var(--text);
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 9px;
     min-width: 200px;
-    animation: slide-in .22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    animation: slide-in .28s cubic-bezier(.2, .9, .3, 1.2);
   }
-  .toast.good { border-color: rgba(74,222,128,0.45); }
-  .toast.bad { border-color: rgba(255,107,107,0.45); }
-  .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .toast.good { border-color: color-mix(in srgb, var(--good) 55%, var(--border-strong)); }
+  .toast.bad { border-color: color-mix(in srgb, var(--danger) 55%, var(--border-strong)); }
+  .toast .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px currentColor; }
   .toast.good .dot { background: var(--good); }
   .toast.bad .dot { background: var(--danger); }
   @keyframes slide-in {
-    from { opacity: 0; transform: translateY(10px) scale(0.96); }
+    from { opacity: 0; transform: translateY(12px) scale(0.96); }
     to { opacity: 1; transform: none; }
   }
 

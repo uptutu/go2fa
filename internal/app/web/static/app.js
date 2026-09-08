@@ -899,4 +899,36 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshAll();
   setInterval(refreshSecrets, 1000);
   setInterval(loadStatus, 30000);
+
+  /* -------- Liquid glass pointer sheen --------
+   * Tracks pointer over glass surfaces and writes normalized (0-100) coords
+   * into --mx / --my on the element. CSS uses those in conic-gradient + radial
+   * sheen. Single rAF coalesces pointermove → style write; delegation keeps
+   * listeners off every secret row.
+   */
+  const glassSel = '.glass, .chip, .btn, .secret, .dialog, .toast, .search, .lang-switch, .status, .empty';
+  let sheenTarget = null;
+  let sheenX = 50, sheenY = 30;
+  let sheenRaf = 0;
+  const flushSheen = () => {
+    sheenRaf = 0;
+    if (!sheenTarget || sheenTarget.isConnected === false) return;
+    sheenTarget.style.setProperty('--mx', sheenX.toFixed(2) + '%');
+    sheenTarget.style.setProperty('--my', sheenY.toFixed(2) + '%');
+  };
+  document.addEventListener('pointermove', (e) => {
+    const el = e.target.closest && e.target.closest(glassSel);
+    if (!el) return;
+    sheenTarget = el;
+    const r = el.getBoundingClientRect();
+    sheenX = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+    sheenY = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
+    if (!sheenRaf) sheenRaf = requestAnimationFrame(flushSheen);
+  }, { passive: true });
+  // Pointer leaving the document should reset so the highlight doesn't stick
+  // on the last hovered element when the cursor leaves the window.
+  document.addEventListener('pointerleave', () => {
+    sheenTarget = null;
+    if (sheenRaf) { cancelAnimationFrame(sheenRaf); sheenRaf = 0; }
+  });
 });
