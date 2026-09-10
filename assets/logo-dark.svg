@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="go2fa logo">
+  <title>go2fa</title>
+  <g fill="#FFFFFF">
+    <circle cx="120" cy="20"  r="6"/>
+    <circle cx="208" cy="60"  r="6"/>
+    <circle cx="208" cy="180" r="6"/>
+    <circle cx="120" cy="220" r="6"/>
+    <circle cx="32"  cy="180" r="6"/>
+    <circle cx="32"  cy="60"  r="6"/>
+  </g>
+  <path d="M 84 92 A 36 36 0 1 1 84 148 L 156 148"
+        fill="none" stroke="#FFFFFF" stroke-width="14"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
