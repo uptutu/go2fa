@@ -139,7 +139,7 @@ and bulk-export selected secrets (checkbox multi-select).
 2fa import <file|-> [--password <pw>]
 2fa tui                                   Launch interactive TUI
 2fa web [--listen <addr>] [--token <t>]   Launch embedded web server
-2fa gui                                   Same as `web`, with a hint for GUI use
+2fa gui                                   Launch desktop GUI (native window)
 
 Global flags:
   --no-password    Initialize a no-password (machine-bound) vault
@@ -206,7 +206,7 @@ The same `*vault.Vault` is shared across all three front-ends.
 ## Build from source
 
 ```sh
-make build           # ./2fa binary
+make build           # ./2fa binary (includes 2fa gui native window)
 make test            # go test ./...
 make test-race       # go test -race ./...
 make vet             # go vet ./...
@@ -234,22 +234,21 @@ dependency.
 
 ### Linux
 
-`2fa tui` and `2fa web` need nothing extra. The vendored WebView build
-(`-tags=webview`) requires `webkit2gtk-4.1-dev` if you choose to build
-it; the default `2fa gui` does not.
-
-The native window uses [`assets/icon.svg`](./assets/icon.svg) as its
-window/taskbar icon — keep the file in the repo root (or set `-ldflags`
-to embed a custom one) when packaging. The same SVG is exposed to the
-Web UI as `/favicon.svg` so browser tabs match the app icon.
+`2fa tui` and `2fa web` need nothing extra. `2fa gui` (native window)
+loads `libwebkit2gtk-4.1` at runtime via glaze — no build tag, no
+compile-time dependency.
 
 ```sh
 # Debian / Ubuntu
-sudo apt install libwebkit2gtk-4.1-dev   # only for -tags=webview
+sudo apt install libwebkit2gtk-4.1-dev   # only for 2fa gui
 
 # Arch
-sudo pacman -S webkit2gtk-4.1            # only for -tags=webview
+sudo pacman -S webkit2gtk-4.1            # only for 2fa gui
 ```
+
+The native window uses the system default icon for now; the
+`assets/icon.svg` is only exposed to the Web UI as `/favicon.svg` so
+browser tabs match the brand.
 
 ### macOS
 

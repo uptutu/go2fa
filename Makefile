@@ -11,7 +11,7 @@ LDFLAGS := -s -w
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
-	@echo "built ./$(BINARY)"
+	@echo "built ./$(BINARY) (includes 2fa gui native window)"
 
 test:
 	go test ./...

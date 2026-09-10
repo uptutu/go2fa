@@ -16,6 +16,9 @@ import (
 	"github.com/uptutu/go2fa/internal/core/vault"
 )
 
+// guiRunner is set by gui_tagged.go to launch a native window.
+var guiRunner func(*vault.Vault) error
+
 var cmdWeb = &cobra.Command{
 	Use:   "web",
 	Short: "Launch the embedded web UI in your default browser",
@@ -25,30 +28,27 @@ var cmdWeb = &cobra.Command{
 			return err
 		}
 		defer v.Close()
-		return launchWeb(v, false)
+		return launchWeb(v)
 	},
 }
 
 var cmdGUI = &cobra.Command{
 	Use:   "gui",
-	Short: "Launch the desktop GUI (browser-based for v1)",
+	Short: "Launch the desktop GUI (native window)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// v1 uses the same web UI in a browser tab. A CGO webview build is
-		// documented in README under "Native Window".
 		v, err := openVault(context.Background())
 		if err != nil {
 			return err
 		}
 		defer v.Close()
-		fmt.Fprintln(os.Stderr, "gui: launching in default browser; rebuild with -tags=webview for native window")
-		return launchWeb(v, true)
+		return guiRunner(v)
 	},
 }
 
 // launchWeb starts the HTTP server, points the browser at it, and blocks
 // until SIGINT / SIGTERM. Without blocking, the main goroutine would exit
 // as soon as openBrowser returns, killing the server goroutine.
-func launchWeb(v *vault.Vault, _ bool) error {
+func launchWeb(v *vault.Vault) error {
 	addr := flagListen
 	if addr == "" {
 		addr = "127.0.0.1:0"
