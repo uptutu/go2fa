@@ -1,5 +1,7 @@
 # 2fa — Cross-platform TOTP Manager
 
+<p align="center"><img src="assets/logo-wordmark.svg" alt="go2fa" width="360"></p>
+
 A single-binary, encrypted TOTP vault with three front-ends — interactive
 TUI, Web UI, and Desktop GUI — all sharing the same Go core.
 
@@ -235,6 +237,11 @@ dependency.
 `2fa tui` and `2fa web` need nothing extra. The vendored WebView build
 (`-tags=webview`) requires `webkit2gtk-4.1-dev` if you choose to build
 it; the default `2fa gui` does not.
+
+The native window uses [`assets/icon.svg`](./assets/icon.svg) as its
+window/taskbar icon — keep the file in the repo root (or set `-ldflags`
+to embed a custom one) when packaging. The same SVG is exposed to the
+Web UI as `/favicon.svg` so browser tabs match the app icon.
 
 ```sh
 # Debian / Ubuntu

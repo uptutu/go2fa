@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>2fa — TOTP Vault</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   /* -------- Tokens -------- */
   :root {
@@ -300,16 +301,15 @@
   header.top h1 .logo {
     width: 28px; height: 28px;
     border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     box-shadow:
       0 0 20px rgba(124,247,177,0.45),
       inset 0 1px 0 rgba(255,255,255,0.55),
       inset 0 -1px 0 rgba(0,0,0,0.18);
-    display: grid; place-items: center;
-    color: #03130a;
-    font-family: var(--mono);
-    font-weight: 800;
-    font-size: 12px;
+  }
+  header.top h1 .logo svg {
+    width: 70%; height: 70%;
   }
   .search {
     flex: 1;
@@ -897,7 +897,19 @@
 <div class="app">
 
   <header class="top glass">
-    <h1><span class="logo">2F</span> <span data-i18n="app_title">2fa — TOTP Vault</span></h1>
+    <h1><span class="logo" aria-hidden="true"><svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+      <g fill="#FFFFFF">
+        <circle cx="120" cy="20"  r="6"/>
+        <circle cx="208" cy="60"  r="6"/>
+        <circle cx="208" cy="180" r="6"/>
+        <circle cx="120" cy="220" r="6"/>
+        <circle cx="32"  cy="180" r="6"/>
+        <circle cx="32"  cy="60"  r="6"/>
+      </g>
+      <path d="M 84 92 A 36 36 0 1 1 84 148 L 156 148"
+            fill="none" stroke="#FFFFFF" stroke-width="14"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg></span> <span data-i18n="app_title">2fa — TOTP Vault</span></h1>
     <span style="flex:1"></span>
     <label class="search" data-i18n-aria="search_aria">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
