@@ -30,6 +30,7 @@ const AppName = "go2fa"
 type Result struct {
 	ShortcutPath string // path of the created shortcut file
 	IconPath     string // path the shortcut points its icon at
+	FellBack     bool   // true if no ~/Desktop existed and we wrote to XDG instead
 }
 
 // Install writes a desktop shortcut for the current OS that launches
@@ -79,12 +80,17 @@ func installLinux(launch string) (*Result, error) {
 	}
 
 	desktopDir := filepath.Join(home, "Desktop")
+	fellBack := false
 	if _, err := os.Stat(desktopDir); os.IsNotExist(err) {
-		// XDG fallback for systems without ~/Desktop (server, minimal DE).
+		// XDG fallback for systems without ~/Desktop (server, minimal DE,
+		// tiling WMs without xdg-user-dirs). The shortcut still shows up
+		// in most app launchers (rofi, GNOME apps, KDE menu) but is NOT
+		// visible as an icon on a Desktop folder that doesn't exist.
 		desktopDir = filepath.Join(home, ".local", "share", "applications")
 		if err := os.MkdirAll(desktopDir, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir applications: %w", err)
 		}
+		fellBack = true
 	}
 
 	// Per the Desktop Entry spec, the Exec line is parsed by the launcher
@@ -107,7 +113,7 @@ StartupNotify=true
 	if err := os.WriteFile(shortcutPath, []byte(body), 0o755); err != nil {
 		return nil, fmt.Errorf("write desktop entry: %w", err)
 	}
-	return &Result{ShortcutPath: shortcutPath, IconPath: iconPath}, nil
+	return &Result{ShortcutPath: shortcutPath, IconPath: iconPath, FellBack: fellBack}, nil
 }
 
 // --- macOS -----------------------------------------------------------------

@@ -89,6 +89,9 @@ var cmdGUIInstall = &cobra.Command{
 		if res.IconPath != "" {
 			fmt.Fprintln(os.Stderr, "icon:               ", res.IconPath)
 		}
+		if res.FellBack {
+			fmt.Fprintln(os.Stderr, "note: no ~/Desktop found; shortcut is in XDG applications dir (use app launcher / rofi / dmenu)")
+		}
 		return nil
 	},
 }
