@@ -3,8 +3,10 @@
 // well-known file format (.desktop, .app bundle, .lnk) and reuses the
 // shipped assets/icon.svg as the program logo.
 //
-// The caller (cmdGUIInstall) decides whether to embed `--password` into
-// the launch command; install itself is a dumb file writer.
+// The shortcut always launches `<binary> gui` with no extra arguments.
+// Password unlock happens via the GUI's own prompt — embedding --password
+// in the shortcut would put a plaintext master password in a file the
+// user (or an attacker with file access) can read.
 package install
 
 import (
@@ -16,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 //go:embed icon.svg
@@ -31,10 +32,11 @@ type Result struct {
 	IconPath     string // path the shortcut points its icon at
 }
 
-// Install writes a desktop shortcut for the current OS. The shortcut
-// launches the running `2fa` binary (resolved via os.Executable) with
-// `gui` and any extra args. If the OS is unsupported, returns an error.
-func Install(extraArgs []string) (*Result, error) {
+// Install writes a desktop shortcut for the current OS that launches
+// `2fa gui` (the running binary, resolved via os.Executable with a
+// $PATH fallback so `go run` invocations still produce a stable path).
+// If the OS is unsupported, returns an error.
+func Install() (*Result, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locate self: %w", err)
@@ -50,11 +52,11 @@ func Install(extraArgs []string) (*Result, error) {
 
 	switch runtime.GOOS {
 	case "linux":
-		return installLinux(launch, extraArgs)
+		return installLinux(launch)
 	case "darwin":
-		return installMac(launch, extraArgs)
+		return installMac(launch)
 	case "windows":
-		return installWindows(launch, extraArgs)
+		return installWindows(launch)
 	default:
 		return nil, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
@@ -62,7 +64,7 @@ func Install(extraArgs []string) (*Result, error) {
 
 // --- linux -----------------------------------------------------------------
 
-func installLinux(launch string, extraArgs []string) (*Result, error) {
+func installLinux(launch string) (*Result, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -85,22 +87,21 @@ func installLinux(launch string, extraArgs []string) (*Result, error) {
 		}
 	}
 
-	exeLine := launch
-	if len(extraArgs) > 0 {
-		exeLine = launch + " gui " + shellQuote(extraArgs)
-	}
-
+	// Per the Desktop Entry spec, the Exec line is parsed by the launcher
+	// (gio/kde), not a shell. Double-quotes delimit fields and are stripped;
+	// single-quotes are taken literally. We only need one field (the
+	// subcommand), so no quoting is required.
 	body := fmt.Sprintf(`[Desktop Entry]
 Version=1.0
 Type=Application
 Name=go2fa
 Comment=Encrypted TOTP authenticator
-Exec=%s
+Exec=%s gui
 Icon=%s
 Terminal=false
 Categories=Utility;Security;
 StartupNotify=true
-`, exeLine, iconPath)
+`, launch, iconPath)
 
 	shortcutPath := filepath.Join(desktopDir, AppName+".desktop")
 	if err := os.WriteFile(shortcutPath, []byte(body), 0o755); err != nil {
@@ -111,7 +112,7 @@ StartupNotify=true
 
 // --- macOS -----------------------------------------------------------------
 
-func installMac(launch string, extraArgs []string) (*Result, error) {
+func installMac(launch string) (*Result, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -153,11 +154,7 @@ func installMac(launch string, extraArgs []string) (*Result, error) {
 	// launcher script: a real CFBundleExecutable that re-invokes the
 	// installed binary. macOS will run it directly when the .app is
 	// double-clicked.
-	execLine := launch
-	if len(extraArgs) > 0 {
-		execLine = launch + " gui " + shellQuote(extraArgs)
-	}
-	script := fmt.Sprintf("#!/bin/sh\nexec %s\n", execLine)
+	script := fmt.Sprintf("#!/bin/sh\nexec %s gui\n", launch)
 	scriptPath := filepath.Join(appDir, "Contents", "MacOS", AppName)
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		return nil, fmt.Errorf("write launcher: %w", err)
@@ -168,7 +165,7 @@ func installMac(launch string, extraArgs []string) (*Result, error) {
 
 // --- windows ---------------------------------------------------------------
 
-func installWindows(launch string, extraArgs []string) (*Result, error) {
+func installWindows(launch string) (*Result, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -189,20 +186,16 @@ func installWindows(launch string, extraArgs []string) (*Result, error) {
 	// .lnk generation via PowerShell (always present on Win10+). We do not
 	// pull a Windows-only Go dep just to write a shortcut file.
 	iconPath := ""
-	args := ""
-	if len(extraArgs) > 0 {
-		args = " gui " + shellQuote(extraArgs)
-	}
 	shortcutPath := filepath.Join(desktop, AppName+".lnk")
 	ps := fmt.Sprintf(`$ws = New-Object -ComObject WScript.Shell
 $s = $ws.CreateShortcut('%s')
 $s.TargetPath = '%s'
-$s.Arguments = '%s'
+$s.Arguments = 'gui'
 $s.WorkingDirectory = '%s'
 $s.WindowStyle = 1
 $s.Description = 'Encrypted TOTP authenticator'
 $s.Save
-`, shortcutPath, launch, args, filepath.Dir(launch))
+`, shortcutPath, launch, filepath.Dir(launch))
 
 	cmd := exec.CommandContext(context.Background(), "powershell", "-NoProfile", "-Command", ps)
 	cmd.Stderr = os.Stderr
@@ -210,15 +203,4 @@ $s.Save
 		return nil, fmt.Errorf("create .lnk via powershell: %w (is PowerShell available?)", err)
 	}
 	return &Result{ShortcutPath: shortcutPath, IconPath: iconPath}, nil
-}
-
-// shellQuote single-quotes each arg (with embedded single-quotes escaped)
-// so it survives being embedded in a .desktop / .lnk / launcher-script
-// command line. POSIX sh semantics; PowerShell strips them at parse time.
-func shellQuote(args []string) string {
-	parts := make([]string, len(args))
-	for i, a := range args {
-		parts[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-	}
-	return strings.Join(parts, " ")
 }

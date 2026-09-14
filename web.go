@@ -51,18 +51,17 @@ var cmdGUIInstall = &cobra.Command{
 	Short: "Install a desktop shortcut for the go2fa GUI on this OS",
 	Long: "Detects the current OS and writes a launcher shortcut (Linux: .desktop, " +
 		"macOS: .app bundle, Windows: .lnk) that invokes `2fa gui`. " +
-		"If --password is given, the vault is initialised in password mode " +
-		"with that password and the shortcut embeds --password so future " +
-		"launches unlock immediately.",
+		"If --password is given and the vault does not yet exist, the vault " +
+		"is initialised in password mode with that password. The shortcut " +
+		"itself does not embed the password; on launch the GUI prompts for " +
+		"unlock when the vault is password-protected.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pw, _ := cmd.Flags().GetString("password")
-		extra := []string(nil)
 		ctx := context.Background()
 
-		// Init the vault if missing. The vault is created here, not inside
-		// Install(), because the install call must be idempotent: re-running
-		// `gui install --password ...` should refresh the shortcut, not
-		// re-init the vault.
+		// Init the vault in password mode if missing and --password was given.
+		// The vault lives independently of the shortcut — install must be
+		// idempotent: re-running refreshes the shortcut without re-init.
 		exists, err := vault.Exists()
 		if err != nil {
 			return err
@@ -82,11 +81,7 @@ var cmdGUIInstall = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "vault initialised in password mode")
 		}
 
-		if pw != "" {
-			extra = []string{"--password=" + pw}
-		}
-
-		res, err := install.Install(extra)
+		res, err := install.Install()
 		if err != nil {
 			return err
 		}
@@ -99,7 +94,7 @@ var cmdGUIInstall = &cobra.Command{
 }
 
 func init() {
-	cmdGUIInstall.Flags().String("password", "", "initialise vault with this master password and embed in shortcut")
+	cmdGUIInstall.Flags().String("password", "", "if the vault does not exist, initialise it in password mode with this password")
 }
 
 // launchWeb starts the HTTP server, points the browser at it, and blocks
