@@ -117,6 +117,20 @@ const dict = {
     unlock_password_label: 'Master password',
     unlock_submit: 'Unlock',
     unlock_err: 'Unlock failed — wrong password?',
+    mode_btn_set: 'Set password',
+    mode_btn_disable: 'Disable password',
+    mode_set_title: 'Set a master password',
+    mode_set_body: 'A master password protects your vault on this machine and on backups. Anyone who gets the file also needs the password to read it.',
+    mode_disable_title: 'Disable master password',
+    mode_disable_body: 'This switches the vault to machine-bound encryption. Anyone with file-system access to this machine can decrypt it without a password.',
+    mode_pw_label: 'New password (8+ characters)',
+    mode_pw2_label: 'Confirm password',
+    mode_pw_mismatch: 'Passwords do not match',
+    mode_pw_short: 'Password must be at least 8 characters',
+    mode_confirm_disable: 'I understand anyone with disk access on this machine can decrypt the vault',
+    mode_confirm_set: 'I will remember this password — there is no way to recover it',
+    mode_going: 'Switching…',
+    mode_done: 'Mode updated',
   },
   zh: {
     app_title: '2fa — TOTP 金库',
@@ -226,6 +240,20 @@ const dict = {
     unlock_password_label: '主密码',
     unlock_submit: '解锁',
     unlock_err: '解锁失败——密码错误?',
+    mode_btn_set: '设置密码',
+    mode_btn_disable: '关闭密码保护',
+    mode_set_title: '设置主密码',
+    mode_set_body: '主密码可在本机与备份文件之外再加一层保护。拿到文件的人也需要密码才能解密。',
+    mode_disable_title: '关闭主密码',
+    mode_disable_body: '此操作将金库切换为本机绑定加密。任何能访问本机文件系统的人都可在没有密码的情况下解密。',
+    mode_pw_label: '新密码(至少 8 位)',
+    mode_pw2_label: '确认密码',
+    mode_pw_mismatch: '两次密码不一致',
+    mode_pw_short: '密码至少需要 8 位',
+    mode_confirm_disable: '我理解:任何可访问本机磁盘的人都能解密金库',
+    mode_confirm_set: '我会记牢这个密码——无法找回',
+    mode_going: '切换中…',
+    mode_done: '模式已更新',
   },
 };
 
@@ -388,6 +416,84 @@ async function ensureUnlocked() {
     }
   } finally {
     unlockPending = false;
+  }
+}
+
+/* -------- Mode switch (password ↔ no-password) --------
+ * Both directions re-encrypt every row under a fresh KEK. The UI does
+ * its own password validation so the server stays a thin shell; the
+ * server enforces ≥8 chars and surfaces the resulting mode. Success:
+ * reload status (mode pill + button label update) + toast. Failure: keep
+ * the dialog open and show the error inline.
+ */
+const modeScrim = $('#mode-dialog');
+
+function openModeDialog() {
+  if (!state.status || !state.status.unlocked) {
+    // Defence in depth: button is only shown when unlocked, but if the
+    // vault just auto-locked, the call would 401 on the server anyway.
+    ensureUnlocked();
+    return;
+  }
+  const wantPassword = state.status.mode !== 'password';
+  $('#mode-title').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
+  $('#mode-body').textContent = wantPassword ? t('mode_set_body') : t('mode_disable_body');
+  $('#mode-pw-fields').hidden = !wantPassword;
+  $('#mode-pw-label').textContent = t('mode_pw_label');
+  $('#mode-pw2-label').textContent = t('mode_pw2_label');
+  $('#mode-pw').value = '';
+  $('#mode-pw2').value = '';
+  $('#mode-confirm-label').textContent = wantPassword ? t('mode_confirm_set') : t('mode_confirm_disable');
+  $('#mode-confirm').checked = false;
+  $('#mode-err').textContent = '';
+  $('#mode-go').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
+  modeScrim.dataset.targetMode = wantPassword ? 'password' : 'no-password';
+  showScrim(modeScrim);
+  // Focus the first relevant field so Enter / Tab flow sensibly.
+  setTimeout(() => (wantPassword ? $('#mode-pw') : $('#mode-confirm')).focus(), 50);
+}
+
+async function submitModeSwitch() {
+  const target = modeScrim.dataset.targetMode;
+  const errEl = $('#mode-err');
+  errEl.textContent = '';
+  if (!$('#mode-confirm').checked) {
+    errEl.textContent = t('mode_confirm_' + (target === 'password' ? 'set' : 'disable'));
+    return;
+  }
+  let password = '';
+  if (target === 'password') {
+    const pw = $('#mode-pw').value;
+    const pw2 = $('#mode-pw2').value;
+    if (pw.length < 8) { errEl.textContent = t('mode_pw_short'); return; }
+    if (pw !== pw2) { errEl.textContent = t('mode_pw_mismatch'); return; }
+    password = pw;
+  }
+  const go = $('#mode-go');
+  go.disabled = true;
+  const prev = go.textContent;
+  go.textContent = t('mode_going');
+  try {
+    const body = JSON.stringify({ mode: target, password });
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['X-Auth-Token'] = authToken;
+    const res = await fetch('/api/mode', { method: 'POST', headers, body });
+    if (!res.ok) {
+      let msg = '';
+      try { msg = (await res.text()) || ''; } catch (_) { /* ignore */ }
+      errEl.textContent = msg || `HTTP ${res.status}`;
+      return;
+    }
+    hideScrim(modeScrim);
+    toast(t('mode_done'), 'good');
+    // Mode changed on disk + in-memory KEK; reload everything so the
+    // status pill, button label, and secret list all reflect it.
+    await refreshAll();
+  } catch (e) {
+    errEl.textContent = (e && e.message) || String(e);
+  } finally {
+    go.disabled = false;
+    go.textContent = prev;
   }
 }
 
@@ -602,6 +708,15 @@ function renderStatus() {
   st.classList.add(s.unlocked ? 'unlocked' : 'locked');
   $('.label', st).textContent = `${s.unlocked ? t('status_unlocked') : t('status_locked')} · ${s.mode}`;
   $('.addr', st).textContent = s.addr ? ` · ${s.addr}` : '';
+
+  // Mode-switch button: visible only when unlocked; label flips based on
+  // current mode (button OFFERS the opposite action).
+  const modeBtn = $('#mode-btn');
+  if (modeBtn) {
+    modeBtn.hidden = !s.unlocked;
+    $('#mode-btn-label', modeBtn).textContent =
+      s.mode === 'password' ? t('mode_btn_disable') : t('mode_btn_set');
+  }
 }
 
 async function loadStatus() {
@@ -1382,6 +1497,20 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#add-btn').addEventListener('click', () => openAdd(''));
   $('#scan-btn').addEventListener('click', startScan);
   $('#new-group-btn').addEventListener('click', createGroup);
+  // Mode switch — opens dialog, posts to /api/mode, reloads on success.
+  $('#mode-btn').addEventListener('click', openModeDialog);
+  $$('#mode-dialog [data-mode]').forEach((b) => {
+    b.addEventListener('click', () => {
+      if (b.dataset.mode !== 'yes') { hideScrim(modeScrim); return; }
+      submitModeSwitch();
+    });
+  });
+  // Enter inside password fields triggers submit.
+  ['#mode-pw', '#mode-pw2'].forEach((sel) => {
+    $(sel).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submitModeSwitch(); }
+    });
+  });
   // Defensive: keep #lock-btn hidden. The HTML has `hidden` set, but CSS
   // (.btn = inline-flex) and stale embedded assets in older builds can
   // surface it. There is no server-side lock endpoint to invoke.

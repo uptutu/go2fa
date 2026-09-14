@@ -562,3 +562,186 @@ func TestAPIUnlockNoPasswordMode(t *testing.T) {
 		t.Fatalf("unlock: got %d, want 200", res.StatusCode)
 	}
 }
+
+// TestAPIModeSwitch covers /api/mode: password ↔ no-password transitions,
+// including re-encryption of stored secrets, validation errors, and the
+// locked-vault guard. Each scenario uses a fresh server so the KEK state
+// is independent (reInitWith's atomic backup is exercised per case).
+func TestAPIModeSwitch(t *testing.T) {
+	post := func(t *testing.T, srv *Server, body string) (*http.Response, []byte) {
+		t.Helper()
+		res, err := http.Post("http://"+srv.Addr()+"/api/mode", "application/json",
+			bytes.NewReader([]byte(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return res, b
+	}
+
+	t.Run("no-password → password re-encrypts secrets", func(t *testing.T) {
+		srv := newTestServer(t) // ModeNoPassword
+		uri := "otpauth://totp/GitHub:a?secret=JBSWY3DPEHPK3PXP"
+		http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
+			bytes.NewBufferString(`{"uri":"`+uri+`"}`))
+
+		res, body := post(t, srv, `{"mode":"password","password":"newmasterpass"}`)
+		if res.StatusCode != 200 {
+			t.Fatalf("switch: %d %s", res.StatusCode, body)
+		}
+		var out map[string]string
+		_ = json.Unmarshal(body, &out)
+		if out["mode"] != "password" {
+			t.Errorf("mode after switch: %q", out["mode"])
+		}
+
+		// Status must reflect the new mode.
+		res, _ = http.Get("http://" + srv.Addr() + "/api/status")
+		var st map[string]any
+		json.NewDecoder(res.Body).Decode(&st)
+		res.Body.Close()
+		if st["mode"] != "password" {
+			t.Errorf("status mode: %v", st["mode"])
+		}
+
+		// Secret must still decrypt under the new KEK and match by code.
+		res, _ = http.Get("http://" + srv.Addr() + "/api/secrets")
+		var list []secretJSON
+		json.NewDecoder(res.Body).Decode(&list)
+		res.Body.Close()
+		if len(list) != 1 || list[0].Issuer != "GitHub" {
+			t.Fatalf("list after switch: %+v", list)
+		}
+		raw, _ := totp.DecodeSecret("JBSWY3DPEHPK3PXP")
+		want, _, _ := totp.Generate(raw, totp.SHA1, 6, 30, time.Now())
+		if list[0].Code != want {
+			t.Errorf("code after rekey: %s != %s", list[0].Code, want)
+		}
+
+		// Wrong password must fail on a fresh unlock — proves the new KEK
+		// actually replaced the old one (not a no-op that left the old
+		// verifier intact).
+		srv.v.Lock()
+		if err := srv.v.UnlockWithPassword(context.Background(), "newmasterpass"); err != nil {
+			t.Errorf("unlock with new password: %v", err)
+		}
+		srv.v.Lock()
+		if err := srv.v.UnlockWithPassword(context.Background(), "wrong"); err == nil {
+			t.Error("unlock with wrong password should fail")
+		}
+	})
+
+	t.Run("password → no-password", func(t *testing.T) {
+		// Fresh password-mode server.
+		dir := t.TempDir()
+		st, _ := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+		v := vault.NewForTesting(st, dir)
+		if err := v.Init(context.Background(), vault.ModePassword, "originalpass"); err != nil {
+			t.Fatal(err)
+		}
+		srv, _ := New("127.0.0.1:0", v, "")
+		srv.Start(context.Background())
+		t.Cleanup(func() { srv.Stop(); v.Close() })
+
+		uri := "otpauth://totp/AWS:a?secret=JBSWY3DPEHPK3PXP"
+		http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
+			bytes.NewBufferString(`{"uri":"`+uri+`"}`))
+
+		res, body := post(t, srv, `{"mode":"no-password"}`)
+		if res.StatusCode != 200 {
+			t.Fatalf("switch: %d %s", res.StatusCode, body)
+		}
+		var out map[string]string
+		_ = json.Unmarshal(body, &out)
+		if out["mode"] != "no-password" {
+			t.Errorf("mode after switch: %q", out["mode"])
+		}
+
+		// Status flips.
+		res, _ = http.Get("http://" + srv.Addr() + "/api/status")
+		var status map[string]any
+		json.NewDecoder(res.Body).Decode(&status)
+		res.Body.Close()
+		if status["mode"] != "no-password" {
+			t.Errorf("status mode: %v", status["mode"])
+		}
+
+		// Secret decrypts under the machine key.
+		res, _ = http.Get("http://" + srv.Addr() + "/api/secrets")
+		var list []secretJSON
+		json.NewDecoder(res.Body).Decode(&list)
+		res.Body.Close()
+		if len(list) != 1 || list[0].Issuer != "AWS" {
+			t.Fatalf("list after disable: %+v", list)
+		}
+	})
+
+	t.Run("password too short", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := post(t, srv, `{"mode":"password","password":"short"}`)
+		if res.StatusCode != 400 {
+			t.Errorf("short pw: want 400, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("unknown mode", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := post(t, srv, `{"mode":"biometric"}`)
+		if res.StatusCode != 400 {
+			t.Errorf("unknown mode: want 400, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("locked vault rejected", func(t *testing.T) {
+		srv := newTestServer(t)
+		srv.v.Lock()
+		res, _ := post(t, srv, `{"mode":"password","password":"newmasterpass"}`)
+		if res.StatusCode != 401 {
+			t.Errorf("locked: want 401, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("wrong method", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := http.Get("http://" + srv.Addr() + "/api/mode")
+		if res.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("GET: want 405, got %d", res.StatusCode)
+		}
+		res.Body.Close()
+	})
+
+	t.Run("idempotent switch — no secrets lost across double-toggle", func(t *testing.T) {
+		srv := newTestServer(t)
+		// Two secrets + a group.
+		for _, uri := range []string{
+			"otpauth://totp/A:a?secret=JBSWY3DPEHPK3PXP",
+			"otpauth://totp/B:b?secret=JBSWY3DPEHPK3PXP",
+		} {
+			http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
+				bytes.NewBufferString(`{"uri":"`+uri+`"}`))
+		}
+		http.Post("http://"+srv.Addr()+"/api/groups", "application/json",
+			bytes.NewBufferString(`{"name":"Work"}`))
+
+		// no-password → password → no-password.
+		post(t, srv, `{"mode":"password","password":"newmasterpass"}`)
+		post(t, srv, `{"mode":"no-password"}`)
+
+		res, _ := http.Get("http://" + srv.Addr() + "/api/secrets")
+		var list []secretJSON
+		json.NewDecoder(res.Body).Decode(&list)
+		res.Body.Close()
+		if len(list) != 2 {
+			t.Errorf("secrets lost: %d", len(list))
+		}
+		// Group must come back too (reInitWith's idMap fix is what makes this hold).
+		res, _ = http.Get("http://" + srv.Addr() + "/api/groups")
+		var gs []vault.Group
+		json.NewDecoder(res.Body).Decode(&gs)
+		res.Body.Close()
+		if len(gs) != 1 || gs[0].Name != "Work" {
+			t.Errorf("groups after round-trip: %+v", gs)
+		}
+	})
+}
