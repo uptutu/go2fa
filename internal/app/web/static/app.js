@@ -125,6 +125,7 @@ const dict = {
     mode_disable_body: 'This switches the vault to machine-bound encryption. Anyone with file-system access to this machine can decrypt it without a password.',
     mode_pw_label: 'New password (8+ characters)',
     mode_pw2_label: 'Confirm password',
+    mode_show_password: 'Show password',
     mode_pw_mismatch: 'Passwords do not match',
     mode_pw_short: 'Password must be at least 8 characters and not blank',
     mode_pw_whitespace: 'Password cannot be only whitespace',
@@ -250,6 +251,7 @@ const dict = {
     mode_disable_body: '此操作将金库切换为本机绑定加密。任何能访问本机文件系统的人都可在没有密码的情况下解密。',
     mode_pw_label: '新密码(至少 8 位)',
     mode_pw2_label: '确认密码',
+    mode_show_password: '显示密码',
     mode_pw_mismatch: '两次密码不一致',
     mode_pw_short: '密码至少 8 位且不能全是空格',
     mode_pw_whitespace: '密码不能全是空白字符',
@@ -460,6 +462,13 @@ function openModeDialog() {
   $('#mode-pw').value = '';
   $('#mode-pw2').value = '';
   $('#mode-confirm').checked = false;
+  // Reset show-password toggle and restore masked inputs each open.
+  const showPw = $('#mode-show');
+  if (showPw) {
+    showPw.checked = false;
+    $('#mode-pw').type = 'password';
+    $('#mode-pw2').type = 'password';
+  }
   $('#mode-err').textContent = '';
   setModeDialogLabels();
   showScrim(modeScrim);
@@ -1586,6 +1595,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') { e.preventDefault(); submitModeSwitch(); }
     });
   });
+  // Show / hide master password while typing it. Only flips input type;
+  // value is preserved so the user keeps what they typed across toggles.
+  const showPw = $('#mode-show');
+  if (showPw) {
+    showPw.addEventListener('change', (e) => {
+      const t = e.target.checked ? 'text' : 'password';
+      $('#mode-pw').type = t;
+      $('#mode-pw2').type = t;
+    });
+  }
   // Defensive: keep #lock-btn hidden. The HTML has `hidden` set, but CSS
   // (.btn = inline-flex) and stale embedded assets in older builds can
   // surface it. There is no server-side lock endpoint to invoke.
