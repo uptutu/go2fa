@@ -92,6 +92,38 @@ const dict = {
     toast_export_done: 'Export downloaded',
     toast_export_failed: 'Export failed: {err}',
     err_export_password: 'Password required for .2fa export',
+    import: 'Import',
+    import_title: 'Import',
+    import_body: 'Pick a .2fa / Aegis / otpauth:// file. Format is detected automatically — a password is asked only if the file is encrypted.',
+    import_file: 'File',
+    import_file_help: 'Supported: .2fa (encrypted), Aegis JSON (plaintext or encrypted), otpauth:// URI list.',
+    import_password: 'Password',
+    import_password_help: 'Required because this file is encrypted.',
+    import_detected: 'Detected: {format}',
+    import_password_required: 'Password is required for this encrypted file',
+    import_action: 'Import',
+    toast_import_done: 'Imported {added}',
+    toast_import_skip_one: ' ({n} duplicate)',
+    toast_import_skip_n: ' ({n} duplicates)',
+    toast_import_groups_one: ', {n} new group',
+    toast_import_groups_n: ', {n} new groups',
+    toast_import_failed: 'Import failed: {err}',
+    toast_import_bad_format: 'Unrecognized file format',
+    import_no_file: 'Pick a file to import',
+    delete_selected: 'Delete',
+    delete_selected_title: 'Delete {n} secret | Delete {n} secrets',
+    delete_selected_body: 'Delete {n} secret? This cannot be undone. | Delete {n} secrets? This cannot be undone.',
+    toast_delete_selected_done: 'Deleted {n} secret | Deleted {n} secrets',
+    toast_delete_selected_failed: 'Delete failed: {err}',
+    action_pw_title: 'Confirm with password',
+    action_pw_label: 'Master password',
+    action_pw_confirm: 'Confirm',
+    action_pw_delete_body: 'Re-enter your master password to delete {n} entry. | Re-enter your master password to delete {n} entries.',
+    action_pw_export_body: 'Re-enter your master password to export.',
+    action_pw_import_body: 'Re-enter your master password to import.',
+    action_pw_add_body: 'Re-enter your master password to add this entry.',
+    password_required: 'Master password required / 需要主密码',
+    password_wrong: 'Wrong master password / 主密码错误',
     generate: 'Generate',
     generate_title: 'Generate a random TOTP secret',
     advanced: 'Advanced',
@@ -116,7 +148,7 @@ const dict = {
     unlock_body: 'Enter your master password to unlock the vault.',
     unlock_password_label: 'Master password',
     unlock_submit: 'Unlock',
-    unlock_err: 'Unlock failed — wrong password?',
+    unlock_err: 'Unlock failed — wrong password? / 解锁失败——密码错误?',
     unlock_action: 'Unlock',
     mode_btn_set: 'Set password',
     mode_btn_disable: 'Disable password',
@@ -220,6 +252,38 @@ const dict = {
     toast_export_done: '已下载导出文件',
     toast_export_failed: '导出失败:{err}',
     err_export_password: '.2fa 导出需要密码',
+    import: '导入',
+    import_title: '导入',
+    import_body: '选择 .2fa / Aegis / otpauth:// 文件,格式自动识别 —— 仅加密文件会要求输入密码。',
+    import_file: '文件',
+    import_file_help: '支持:.2fa (加密)、Aegis JSON (明文或加密)、otpauth:// URI 列表。',
+    import_password: '密码',
+    import_password_help: '当前文件已加密,需要密码。',
+    import_detected: '已识别:{format}',
+    import_password_required: '加密文件需要密码',
+    import_action: '导入',
+    toast_import_done: '已导入 {added} 条',
+    toast_import_skip_one: '({n} 条重复)',
+    toast_import_skip_n: '({n} 条重复)',
+    toast_import_groups_one: '新增 {n} 个分组',
+    toast_import_groups_n: '新增 {n} 个分组',
+    toast_import_failed: '导入失败:{err}',
+    toast_import_bad_format: '无法识别的文件格式',
+    import_no_file: '请选择要导入的文件',
+    delete_selected: '删除',
+    delete_selected_title: '删除 {n} 条 | 删除 {n} 条',
+    delete_selected_body: '删除 {n} 条?此操作不可撤销。| 删除 {n} 条?此操作不可撤销。',
+    toast_delete_selected_done: '已删除 {n} 条 | 已删除 {n} 条',
+    toast_delete_selected_failed: '删除失败:{err}',
+    action_pw_title: '请输入主密码以确认',
+    action_pw_label: '主密码',
+    action_pw_confirm: '确认',
+    action_pw_delete_body: '请重新输入主密码以删除 {n} 条。| 请重新输入主密码以删除 {n} 条。',
+    action_pw_export_body: '请重新输入主密码以导出。',
+    action_pw_import_body: '请重新输入主密码以导入。',
+    action_pw_add_body: '请重新输入主密码以添加此条目。',
+    password_required: '需要主密码 / Master password required',
+    password_wrong: '主密码错误 / Wrong master password',
     generate: '生成',
     generate_title: '随机生成一个 TOTP 密钥',
     advanced: '高级',
@@ -246,7 +310,7 @@ const dict = {
     unlock_body: '输入主密码以解锁金库。',
     unlock_password_label: '主密码',
     unlock_submit: '解锁',
-    unlock_err: '解锁失败——密码错误?',
+    unlock_err: '解锁失败——密码错误? / Unlock failed — wrong password?',
     unlock_action: '解锁',
     mode_btn_set: '设置密码',
     mode_btn_disable: '关闭密码保护',
@@ -368,6 +432,101 @@ function promptForToken() {
       if (e.key === 'Enter') { e.preventDefault(); cleanup(input.value.trim()); }
     };
   });
+}
+
+// promptActionPassword asks the user to re-enter the master password
+// for a step-up check (destructive actions). The validator runs the
+// fetch with the entered password and returns the Response on success
+// or throws on a server-side rejection — the dialog stays open on
+// throw so the user can correct the password or hit Cancel, matching
+// the unlock flow. Resolves with the Response on success, or null on
+// cancel/Escape. In-flight validation is ignored if the user cancels.
+function promptActionPassword(promptBody, validate) {
+  return new Promise((resolve) => {
+    const scrim = $('#action-pw');
+    const input = /** @type {HTMLInputElement} */ ($('#action-pw-input'));
+    const yesBtn = /** @type {HTMLButtonElement} */ ($('[data-action-pw="yes"]', scrim));
+    $('#action-pw-body').textContent = promptBody;
+    const errEl = $('#action-pw-err');
+    errEl.textContent = '';
+    input.value = '';
+    yesBtn.disabled = false;
+    showScrim(scrim);
+    setTimeout(() => input.focus(), 50);
+
+    let cancelled = false;
+    const close = (val) => {
+      hideScrim(scrim);
+      $$('[data-action-pw]', scrim).forEach((b) => { b.onclick = null; });
+      input.onkeydown = null;
+      resolve(val);
+    };
+    const submit = async () => {
+      if (cancelled) return;
+      yesBtn.disabled = true;
+      errEl.textContent = '';
+      try {
+        const res = await validate(input.value);
+        if (cancelled) return;
+        close(res);
+      } catch (_) {
+        if (cancelled) return;
+        errEl.textContent = t('password_wrong');
+      } finally {
+        yesBtn.disabled = false;
+      }
+    };
+    $$('[data-action-pw]', scrim).forEach((b) => {
+      b.onclick = () => {
+        if (b.dataset.actionPw !== 'yes') {
+          cancelled = true;
+          return close(null);
+        }
+        submit();
+      };
+    });
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelled = true; close(null); }
+    };
+  });
+}
+
+// needsActionPassword is true when the vault was opened with a master
+// password — i.e. the gate is meaningful. Status is polled by loadStatus()
+// on init; absent mode defaults to false (no extra prompt).
+function needsActionPassword() {
+  return state.status && state.status.mode === 'password';
+}
+
+// fetchWithActionPassword wraps fetch with the step-up master-password
+// gate used by destructive endpoints. Skips the prompt entirely when
+// the vault has no master password (no-password mode needs no
+// step-up). Otherwise it opens the prompt, runs the fetch through the
+// validator, and on a wrong-password rejection keeps the dialog open
+// so the user can retry or cancel. Returns the raw Response so callers
+// keep their existing JSON / blob / status handling; throws on cancel.
+async function fetchWithActionPassword(url, opts, promptBody) {
+  const headers = { ...(opts.headers || {}) };
+  if (authToken) headers['X-Auth-Token'] = authToken;
+  if (!needsActionPassword()) {
+    return fetch(url, { ...opts, headers });
+  }
+  const res = await promptActionPassword(promptBody, async (pw) => {
+    headers['X-Action-Password'] = pw;
+    const r = await fetch(url, { ...opts, headers });
+    if (r.status !== 401) return r;
+    const ct = r.headers.get('Content-Type') || '';
+    let body = {};
+    try { body = ct.includes('json') ? await r.json() : { message: await r.text() }; }
+    catch (_) { /* ignore */ }
+    if (body.code !== 'password_required' && body.code !== 'password_wrong') return r;
+    // Wrong master password — the prompt keeps the dialog open and
+    // surfaces this message inline; user can re-type or cancel.
+    throw new Error(t('password_wrong'));
+  });
+  if (res === null) throw new Error('cancelled');
+  return res;
 }
 
 /* -------- Vault unlock (idle auto-lock / manual lock) --------
@@ -1187,6 +1346,10 @@ function updateSelectionUI() {
   const count = $('#export-count');
   btn.hidden = state.selected.size === 0;
   count.textContent = String(state.selected.size);
+  const delBtn = $('#delete-selected-btn');
+  const delCount = $('#delete-selected-count');
+  if (delBtn) delBtn.hidden = state.selected.size === 0;
+  if (delCount) delCount.textContent = String(state.selected.size);
   document.body.classList.toggle('selecting', state.selected.size > 0);
   const sa = $('#select-all');
   if (!sa) return;
@@ -1340,13 +1503,19 @@ async function saveAdd() {
   const btn = $('#save-btn');
   btn.disabled = true;
   try {
-    await api('/api/secrets', { method: 'POST', body: JSON.stringify(body) });
+    const res = await fetchWithActionPassword(
+      '/api/secrets',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      t('action_pw_add_body'),
+    );
+    if (res.status === 423) throw new Error(t('locked'));
+    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
     toast(t('toast_secret_added'), 'good');
     hideScrim(addScrim);
     stopScan();
     await refreshAll();
   } catch (e) {
-    err.textContent = e.message || String(e);
+    if (e.message !== 'cancelled') err.textContent = e.message || String(e);
   } finally {
     btn.disabled = false;
   }
@@ -1401,13 +1570,47 @@ async function deleteEditing() {
   const ok = await confirmDialog(`Delete secret “${editingId.issuer}”? This cannot be undone.`);
   if (!ok) return;
   try {
-    await api(`/api/secrets/${editingId.id}`, { method: 'DELETE' });
+    const res = await fetchWithActionPassword(
+      `/api/secrets/${editingId.id}`,
+      { method: 'DELETE' },
+      t('action_pw_delete_body', { n: 1 }),
+    );
+    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
     toast(t('toast_secret_deleted'), 'good');
     hideScrim(editScrim);
     editingId = null;
     await refreshAll();
   } catch (e) {
-    toast(t('toast_delete_failed', { err: e.message }), 'bad');
+    if (e.message !== 'cancelled') {
+      toast(t('toast_delete_failed', { err: e.message }), 'bad');
+    }
+  }
+}
+
+/* -------- Bulk delete (toolbar) -------- */
+
+async function deleteSelected() {
+  const n = state.selected.size;
+  if (n === 0) return;
+  const body = tp('delete_selected_body', n);
+  const ok = await confirmDialog(body);
+  if (!ok) return;
+  try {
+    const res = await fetchWithActionPassword(
+      '/api/secrets/delete',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(state.selected) }) },
+      tp('action_pw_delete_body', n),
+    );
+    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+    const data = await res.json();
+    state.selected.clear();
+    await refreshAll();
+    toast(tp('toast_delete_selected_done', data.deleted ?? n), 'good');
+  } catch (e) {
+    if (e.message !== 'cancelled') {
+      toast(t('toast_delete_selected_failed', { err: e.message || e }), 'bad');
+    }
   }
 }
 
@@ -1446,7 +1649,7 @@ function hideScrim(el) {
 }
 function escClose(e) {
   if (e.key !== 'Escape') return;
-  for (const el of [editScrim, addScrim, $('#confirm'), exportScrim]) {
+  for (const el of [editScrim, addScrim, $('#confirm'), exportScrim, importScrim, $('#action-pw')]) {
     if (el && !el.hidden && el.classList.contains('show')) { hideScrim(el); return; }
   }
 }
@@ -1544,11 +1747,13 @@ async function doExport() {
   try {
     // api() returns parsed JSON or text; for binary .2fa we use raw fetch and
     // pipe the blob straight to a download link.
-    const headers = { 'Content-Type': 'application/json' };
-    if (authToken) headers['X-Auth-Token'] = authToken;
-    const res = await fetch('/api/export', { method: 'POST', headers, body: JSON.stringify(body) });
+    const res = await fetchWithActionPassword(
+      '/api/export',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      t('action_pw_export_body'),
+    );
     if (res.status === 401) {
-      // piggy-back on api()'s prompt flow for token
+      // Auth-token (non-loopback) path piggy-backs on the existing flow.
       authToken = '';
       sessionStorage.removeItem('2fa.token');
       const tok = await promptForToken();
@@ -1574,6 +1779,131 @@ async function doExport() {
   } catch (e) {
     err.textContent = e.message || String(e);
     toast(t('toast_export_failed', { err: e.message || e }), 'bad');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* -------- Import -------- */
+
+const importScrim = $('#import-dialog');
+const importPwRow = $('#import-pw-row');
+const importDetected = $('#import-detected');
+const importGoBtn = $('#import-go');
+
+// sniffFormat mirrors importexport.Sniff on the client so the dialog can
+// reveal the password input only when the chosen file is encrypted. The
+// server is still the source of truth — if our guess is wrong, /api/import
+// rejects the request with a precise error code.
+async function sniffFormat(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  // 2FA\x01 magic = our own binary container (always encrypted).
+  if (buf.length >= 4 && buf[0] === 0x32 && buf[1] === 0x46 && buf[2] === 0x41 && buf[3] === 0x01) {
+    return { id: '2fa', label: '.2fa (encrypted)', needsPassword: true };
+  }
+  let probe = null;
+  try { probe = JSON.parse(new TextDecoder().decode(buf)); } catch { /* not JSON */ }
+  if (probe && typeof probe === 'object') {
+    if ('version' in probe && 'db' in probe) {
+      return { id: 'aegis-enc', label: 'Aegis (encrypted)', needsPassword: true };
+    }
+    if ('entries' in probe) {
+      return { id: 'aegis-plain', label: 'Aegis (plaintext)', needsPassword: false };
+    }
+  }
+  // Trim BOM + whitespace before the otpauth:// check.
+  const head = new TextDecoder().decode(buf.subarray(0, Math.min(buf.length, 256))).trimStart();
+  if (head.startsWith('otpauth://')) {
+    return { id: 'otpauth', label: 'otpauth:// URI list', needsPassword: false };
+  }
+  return { id: 'unknown', label: '', needsPassword: false };
+}
+
+function resetImportState() {
+  $('#import-err').textContent = '';
+  $('#import-file').value = '';
+  $('#import-pw').value = '';
+  importPwRow.hidden = true;
+  importDetected.hidden = true;
+  importDetected.textContent = '';
+  importGoBtn.disabled = false;
+}
+
+async function onImportFileChange() {
+  const fileEl = /** @type {HTMLInputElement} */ ($('#import-file'));
+  const file = fileEl.files && fileEl.files[0];
+  importPwRow.hidden = true;
+  $('#import-pw').value = '';
+  importDetected.hidden = true;
+  if (!file) return;
+  const fmt = await sniffFormat(file);
+  importDetected.textContent = t('import_detected', { format: fmt.label });
+  importDetected.hidden = !fmt.label;
+  importPwRow.hidden = !fmt.needsPassword;
+  if (fmt.needsPassword) setTimeout(() => $('#import-pw').focus(), 50);
+}
+
+function openImport() {
+  resetImportState();
+  showScrim(importScrim);
+  setTimeout(() => $('#import-file').focus(), 50);
+}
+
+async function doImport() {
+  const err = $('#import-err');
+  err.textContent = '';
+  const fileEl = /** @type {HTMLInputElement} */ ($('#import-file'));
+  const file = fileEl.files && fileEl.files[0];
+  if (!file) { err.textContent = t('import_no_file'); return; }
+  const fmt = await sniffFormat(file);
+  const pw = $('#import-pw').value;
+  if (fmt.needsPassword && !pw) { err.textContent = t('import_password_required'); $('#import-pw').focus(); return; }
+  const btn = $('#import-go');
+  btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (pw) fd.append('password', pw);
+    let res = await fetchWithActionPassword(
+      '/api/import',
+      { method: 'POST', body: fd },
+      t('action_pw_import_body'),
+    );
+    if (res.status === 401) {
+      // Token-gated non-loopback bind: piggy-back on the export flow's
+      // prompt + retry behaviour. Keeps the auth UX in one place.
+      authToken = '';
+      sessionStorage.removeItem('2fa.token');
+      const tok = await promptForToken();
+      if (tok) {
+        authToken = tok;
+        sessionStorage.setItem('2fa.token', tok);
+        return doImport();
+      }
+      throw new Error('unauthorized');
+    }
+    // Surface server errors via the structured apiError body when present.
+    const ct = res.headers.get('Content-Type') || '';
+    const body = ct.includes('json') ? await res.json() : { message: await res.text() };
+    if (!res.ok) {
+      throw new Error(body.message || body.code || `HTTP ${res.status}`);
+    }
+    let msg = t('toast_import_done', { added: body.added });
+    if (body.skipped > 0) {
+      const k = body.skipped === 1 ? 'toast_import_skip_one' : 'toast_import_skip_n';
+      msg += t(k, { n: body.skipped });
+    }
+    if (body.groups > 0) {
+      const k = body.groups === 1 ? 'toast_import_groups_one' : 'toast_import_groups_n';
+      msg += t(k, { n: body.groups });
+    }
+    hideScrim(importScrim);
+    toast(msg, 'good');
+    // Reflect the new rows in the visible list immediately.
+    refreshAll();
+  } catch (e) {
+    err.textContent = e.message || String(e);
+    toast(t('toast_import_failed', { err: e.message || e }), 'bad');
   } finally {
     btn.disabled = false;
   }
@@ -1691,6 +2021,15 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#exp-pw-row').hidden = /** @type {HTMLSelectElement} */ (e.target).value !== '.2fa';
   });
 
+  // Import
+  $('#import-btn').addEventListener('click', openImport);
+  $$('#import-dialog [data-close]').forEach((b) => b.addEventListener('click', () => hideScrim(importScrim)));
+  $('#import-go').addEventListener('click', doImport);
+  $('#import-file').addEventListener('change', onImportFileChange);
+
+  // Bulk delete (toolbar)
+  $('#delete-selected-btn').addEventListener('click', deleteSelected);
+
   // Search
   $('#q').addEventListener('input', (e) => {
     state.filter.q = /** @type {HTMLInputElement} */ (e.target).value;
@@ -1709,7 +2048,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Click outside dialog content closes
-  for (const sc of [addScrim, editScrim, $('#confirm'), exportScrim]) {
+  for (const sc of [addScrim, editScrim, $('#confirm'), exportScrim, importScrim, $('#action-pw')]) {
     sc.addEventListener('mousedown', (e) => {
       if (e.target === sc) {
         if (sc === addScrim) stopScan();

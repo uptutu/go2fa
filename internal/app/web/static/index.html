@@ -1472,6 +1472,15 @@
         <span data-i18n="export">Export</span>
         <span id="export-count" class="count">0</span>
       </button>
+      <button id="delete-selected-btn" class="btn danger" type="button" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        <span data-i18n="delete">Delete</span>
+        <span id="delete-selected-count" class="count">0</span>
+      </button>
+      <button id="import-btn" class="btn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/></svg>
+        <span data-i18n="import">Import</span>
+      </button>
       <span style="flex:1"></span>
       <button id="scan-btn" class="btn" type="button"><span data-i18n="scan_qr">Scan QR</span></button>
       <button id="lock-btn" class="btn ghost" type="button" data-i18n="unlock_action" hidden>Unlock</button>
@@ -1611,6 +1620,56 @@
     <footer>
       <button class="btn ghost" type="button" data-close data-i18n="cancel">Cancel</button>
       <button id="export-go" class="btn primary" type="button" data-i18n="export_download">Download</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Import dialog -->
+<div id="import-dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="import-title" hidden>
+  <div class="dialog" style="width:min(440px, calc(100vw - 32px))">
+    <header>
+      <h2 id="import-title" data-i18n="import_title">Import</h2>
+      <button class="icon-btn close" type="button" data-i18n-aria="close_aria" data-close>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="body">
+      <p data-i18n="import_body" style="margin:0;color:var(--text-dim)">Pick a .2fa / Aegis / otpauth:// file. Format is detected automatically — a password is asked only if the file is encrypted.</p>
+      <div class="field">
+        <label for="import-file" data-i18n="import_file">File</label>
+        <input id="import-file" type="file" accept=".2fa,.json,.txt,application/json,text/plain,application/octet-stream">
+        <span class="help" data-i18n="import_file_help">Supported: .2fa (encrypted), Aegis JSON (plaintext or encrypted), otpauth:// URI list.</span>
+        <span id="import-detected" class="help" hidden></span></span>
+      </div>
+      <div class="field" id="import-pw-row" hidden>
+        <label for="import-pw" data-i18n="import_password">Password</label>
+        <input id="import-pw" type="password" autocomplete="off" spellcheck="false">
+        <span class="help" data-i18n="import_password_help">Required because this file is encrypted.</span>
+      </div>
+      <div id="import-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button class="btn ghost" type="button" data-close data-i18n="cancel">Cancel</button>
+      <button id="import-go" class="btn primary" type="button" data-i18n="import_action">Import</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Master-password re-auth (shown for destructive actions in password mode) -->
+<div id="action-pw" class="scrim" role="dialog" aria-modal="true" aria-labelledby="action-pw-title" hidden>
+  <div class="dialog" style="width:min(420px, calc(100vw - 32px))">
+    <header><h2 id="action-pw-title" data-i18n="action_pw_title">Confirm with password</h2></header>
+    <div class="body">
+      <p id="action-pw-body" style="margin:0;color:var(--text-dim)"></p>
+      <div class="field" style="margin-top:12px">
+        <label for="action-pw-input" data-i18n="action_pw_label">Master password</label>
+        <input id="action-pw-input" type="password" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="action-pw-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button class="btn ghost" type="button" data-action-pw="no" data-i18n="cancel">Cancel</button>
+      <button class="btn primary" type="button" data-action-pw="yes" data-i18n="action_pw_confirm">Confirm</button>
     </footer>
   </div>
 </div>
