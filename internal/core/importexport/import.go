@@ -12,17 +12,21 @@
 // a passphrase.
 //
 // Aegis spec reference:
-//   https://github.com/beemdevelopment/Aegis/blob/master/docs/backup.md
+//
+//	https://github.com/beemdevelopment/Aegis/blob/master/docs/backup.md
 package importexport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/uptutu/go2fa/internal/core/crypto"
 	"github.com/uptutu/go2fa/internal/core/otpauth"
@@ -34,11 +38,11 @@ import (
 type Format int
 
 const (
-	FormatUnknown Format = iota
-	Format2FA             // our own binary container
-	FormatAegisPlain      // unencrypted Aegis JSON
-	FormatAegisEncrypted  // password-encrypted Aegis JSON
-	FormatOtpauth         // newline-separated otpauth:// URIs
+	FormatUnknown        Format = iota
+	Format2FA                   // our own binary container
+	FormatAegisPlain            // unencrypted Aegis JSON
+	FormatAegisEncrypted        // password-encrypted Aegis JSON
+	FormatOtpauth               // newline-separated otpauth:// URIs
 )
 
 // Sniff detects the format from raw bytes (already read into memory).
@@ -177,13 +181,13 @@ type AegisEncryptedHeader struct {
 
 // AegisSlot is one password slot in Aegis's KDF.
 type AegisSlot struct {
-	UUID     string `json:"uuid"`
-	Type     int    `json:"type"`
-	N        int    `json:"n"`
-	R        int    `json:"r"`
-	P        int    `json:"p"`
-	Salt     string `json:"salt"`   // base64
-	Secret   string `json:"secret"` // base64, encrypted key
+	UUID      string `json:"uuid"`
+	Type      int    `json:"type"`
+	N         int    `json:"n"`
+	R         int    `json:"r"`
+	P         int    `json:"p"`
+	Salt      string `json:"salt"`   // base64
+	Secret    string `json:"secret"` // base64, encrypted key
 	KeyParams struct {
 		Nonce string `json:"nonce"`
 		Tag   string `json:"tag"`
@@ -300,4 +304,54 @@ func parseAlgoName(s string) (totp.Algo, error) {
 		return totp.SHA512, nil
 	}
 	return 0, fmt.Errorf("unknown algorithm %q", s)
+}
+
+// MergeStats reports the outcome of MergeIntoVault.
+type MergeStats struct {
+	Added   int // new secrets upserted
+	Skipped int // duplicates (issuer+account) skipped
+	Groups  int // new groups created
+}
+
+// MergeIntoVault applies an ImportResult to v, creating any groups that
+// don't already exist and upserting each secret. Secrets whose issuer+
+// account already exists in the vault under a different UUID are skipped
+// (the typical re-import case for an otpauth:// URI list, which carries
+// no UUIDs); secrets that keep their original UUID still upsert so a
+// re-import of an Aegis/.2fa export updates in place. Used by both the
+// CLI `import` command and the web/UI import endpoint.
+func MergeIntoVault(ctx context.Context, v *vault.Vault, res ImportResult) (MergeStats, error) {
+	var st MergeStats
+	existingGroups, _ := v.ListGroups(ctx)
+	gid := make(map[string]int64, len(existingGroups))
+	for _, g := range existingGroups {
+		gid[g.Name] = g.ID
+	}
+	for _, g := range res.Groups {
+		if _, ok := gid[g.Name]; ok {
+			continue
+		}
+		newID, err := v.CreateGroup(ctx, g)
+		if err != nil {
+			return st, err
+		}
+		gid[g.Name] = newID
+		st.Groups++
+	}
+	existing, _ := v.ListSecrets(ctx)
+	have := make(map[string]uuid.UUID, len(existing))
+	for _, es := range existing {
+		have[es.Issuer+"\x00"+es.Account] = es.ID
+	}
+	for _, s := range res.Secrets {
+		if id, ok := have[s.Issuer+"\x00"+s.Account]; ok && id != s.ID {
+			st.Skipped++
+			continue
+		}
+		if err := v.UpsertSecret(ctx, s); err != nil {
+			return st, err
+		}
+		st.Added++
+	}
+	return st, nil
 }

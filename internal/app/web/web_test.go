@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -645,8 +646,11 @@ func TestAPIModeSwitch(t *testing.T) {
 		t.Cleanup(func() { srv.Stop(); v.Close() })
 
 		uri := "otpauth://totp/AWS:a?secret=JBSWY3DPEHPK3PXP"
-		http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
+		req, _ := http.NewRequest("POST", "http://"+srv.Addr()+"/api/secrets",
 			bytes.NewBufferString(`{"uri":"`+uri+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Action-Password", "originalpass")
+		http.DefaultClient.Do(req)
 
 		res, body := post(t, srv, `{"mode":"no-password","current_password":"originalpass"}`)
 		if res.StatusCode != 200 {
@@ -1048,4 +1052,330 @@ func TestAPIPreferences(t *testing.T) {
 	})
 }
 
-func min(a, b int) int { if a < b { return a }; return b }
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// passwordSrv builds a fresh server backed by a ModePassword vault. The
+// returned password is the one callers must send via X-Action-Password
+// to pass the step-up gate.
+func passwordSrv(t *testing.T, pw string) *Server {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := vault.NewForTesting(st, dir)
+	if err := v.Init(context.Background(), vault.ModePassword, pw); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New("127.0.0.1:0", v, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(); _ = v.Close() })
+	return srv
+}
+
+// actionPost is a small helper for destructive-endpoint tests: posts
+// JSON with the optional X-Action-Password header set.
+func actionPost(t *testing.T, srv *Server, body, pw string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest("POST", "http://"+srv.Addr()+"/api/secrets", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if pw != "" {
+		req.Header.Set("X-Action-Password", pw)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	out, _ := io.ReadAll(res.Body)
+	return res, out
+}
+
+// TestAPIPasswordGate confirms the step-up master-password gate on the
+// destructive endpoints (add / delete / export / import). In password
+// mode the endpoints reject missing or wrong passwords with 401 +
+// password_required / password_wrong; in no-password mode the same
+// calls work with no header at all. One test exercises each leg so a
+// future regression that drops the gate from a single endpoint fails
+// loudly.
+func TestAPIPasswordGate(t *testing.T) {
+	// Add (POST /api/secrets) — password mode rejects without header.
+	t.Run("add rejects without password in password mode", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		res, body := actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "")
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status: %d %s", res.StatusCode, body)
+		}
+		var e struct{ Code string }
+		json.Unmarshal(body, &e)
+		if e.Code != "password_required" {
+			t.Fatalf("code: %q", e.Code)
+		}
+	})
+	t.Run("add rejects wrong password", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		res, _ := actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "WRONG")
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+	})
+	t.Run("add accepts correct password", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		res, _ := actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "pw123")
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+	})
+	t.Run("add skips gate in no-password mode", func(t *testing.T) {
+		srv := newTestServer(t) // no-password
+		res, _ := actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "")
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+	})
+
+	// Delete (single, via /api/secrets/{id}).
+	t.Run("delete rejects without password in password mode", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		// Insert with the password so we have something to delete.
+		res, _ := actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "pw123")
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("seed insert: %d", res.StatusCode)
+		}
+		listRes, _ := http.Get("http://" + srv.Addr() + "/api/secrets")
+		var list []struct{ ID string }
+		json.NewDecoder(listRes.Body).Decode(&list)
+		listRes.Body.Close()
+		if len(list) != 1 {
+			t.Fatalf("seed count: %d", len(list))
+		}
+		req, _ := http.NewRequest("DELETE", "http://"+srv.Addr()+"/api/secrets/"+list[0].ID, nil)
+		delRes, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delRes.Body.Close()
+		if delRes.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status: %d", delRes.StatusCode)
+		}
+	})
+	t.Run("delete accepts correct password", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "pw123")
+		listRes, _ := http.Get("http://" + srv.Addr() + "/api/secrets")
+		var list []struct{ ID, Issuer, Account string }
+		json.NewDecoder(listRes.Body).Decode(&list)
+		listRes.Body.Close()
+		if len(list) != 1 {
+			t.Fatalf("seed count: %d", len(list))
+		}
+		req, _ := http.NewRequest("DELETE", "http://"+srv.Addr()+"/api/secrets/"+list[0].ID, nil)
+		req.Header.Set("X-Action-Password", "pw123")
+		delRes, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delRes.Body.Close()
+		if delRes.StatusCode != http.StatusOK {
+			t.Fatalf("status: %d", delRes.StatusCode)
+		}
+	})
+
+	// Bulk delete (POST /api/secrets/delete).
+	t.Run("bulk delete rejects without password", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		// seed
+		actionPost(t, srv, `{"issuer":"a","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "pw123")
+		actionPost(t, srv, `{"issuer":"b","secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ","algorithm":"SHA1"}`, "pw123")
+		req, _ := http.NewRequest("POST", "http://"+srv.Addr()+"/api/secrets/delete",
+			bytes.NewBufferString(`{"ids":[]}`)) // ids irrelevant — gate fires first
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+	})
+	t.Run("bulk delete accepts correct password", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		actionPost(t, srv, `{"issuer":"a","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "pw123")
+		actionPost(t, srv, `{"issuer":"b","secret":"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ","algorithm":"SHA1"}`, "pw123")
+		listRes, _ := http.Get("http://" + srv.Addr() + "/api/secrets")
+		var list []struct{ ID, Issuer string }
+		json.NewDecoder(listRes.Body).Decode(&list)
+		listRes.Body.Close()
+		if len(list) != 2 {
+			t.Fatalf("seed count: %d", len(list))
+		}
+		ids := []string{list[0].ID, list[1].ID}
+		body, _ := json.Marshal(map[string][]string{"ids": ids})
+		req, _ := http.NewRequest("POST", "http://"+srv.Addr()+"/api/secrets/delete", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Action-Password", "pw123")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(res.Body)
+			t.Fatalf("status: %d %s", res.StatusCode, b)
+		}
+		var out struct {
+			Deleted   int `json:"deleted"`
+			Requested int `json:"requested"`
+		}
+		json.NewDecoder(res.Body).Decode(&out)
+		if out.Deleted != 2 || out.Requested != 2 {
+			t.Fatalf("counts: %+v", out)
+		}
+	})
+
+	// Export gate (the file-encryption password field stays untouched).
+	t.Run("export rejects without password in password mode", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		actionPost(t, srv, `{"issuer":"x","secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA1"}`, "pw123")
+		req, _ := http.NewRequest("POST", "http://"+srv.Addr()+"/api/export",
+			bytes.NewBufferString(`{"format":"otpauth"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+	})
+
+	// Import gate.
+	t.Run("import rejects without password in password mode", func(t *testing.T) {
+		srv := passwordSrv(t, "pw123")
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, _ := mw.CreateFormFile("file", "import.txt")
+		fw.Write([]byte("otpauth://totp/A:a?secret=JBSWY3DPEHPK3PXP&issuer=A"))
+		mw.Close()
+		req, _ := http.NewRequest("POST", "http://"+srv.Addr()+"/api/import", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+	})
+}
+
+// TestAPIImportOtpauth exercises the smallest happy path of /api/import:
+// upload a one-line otpauth:// list, expect the secret to appear in the
+// vault with the same counts the CLI would print. Format sniffing is
+// implicitly covered — if Sniff misread this as anything else, the import
+// would fail with `unrecognized format` or 0 secrets added.
+func TestAPIImportOtpauth(t *testing.T) {
+	srv := newTestServer(t)
+	uri := "otpauth://totp/Acme%20Corp:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Acme%20Corp&algorithm=SHA1&digits=6&period=30"
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "import.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write([]byte(uri)); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+	res, err := http.Post("http://"+srv.Addr()+"/api/import", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d: %s", res.StatusCode, b)
+	}
+	var out struct {
+		Format  string `json:"format"`
+		Added   int    `json:"added"`
+		Skipped int    `json:"skipped"`
+		Groups  int    `json:"groups"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Format != "otpauth" || out.Added != 1 || out.Skipped != 0 {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+	// Second import of the same line must be reported as a duplicate, not
+	// upserted twice (dedupe-by-issuer+account contract from MergeIntoVault).
+	var buf2 bytes.Buffer
+	mw2 := multipart.NewWriter(&buf2)
+	fw2, _ := mw2.CreateFormFile("file", "import.txt")
+	fw2.Write([]byte(uri))
+	mw2.Close()
+	res2, err := http.Post("http://"+srv.Addr()+"/api/import", mw2.FormDataContentType(), &buf2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res2.Body.Close()
+	var out2 struct {
+		Added, Skipped int
+	}
+	if err := json.NewDecoder(res2.Body).Decode(&out2); err != nil {
+		t.Fatal(err)
+	}
+	if out2.Added != 0 || out2.Skipped != 1 {
+		t.Fatalf("second import: expected 0 added / 1 skipped, got %+v", out2)
+	}
+}
+
+// TestAPIImportRejectsEncryptedWithoutPassword confirms the server refuses
+// a password-encrypted file when no password is supplied, so the UI can
+// surface the `import_password_required` error and ask again.
+func TestAPIImportRejectsEncryptedWithoutPassword(t *testing.T) {
+	srv := newTestServer(t)
+	// Any Aegis-shaped JSON with a version+db field is detected as
+	// encrypted, regardless of whether the payload actually decrypts.
+	aeg := `{"version":1,"header":{"slots":[]},"db":""}`
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "aegis.json")
+	if _, err := fw.Write([]byte(aeg)); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+	res, err := http.Post("http://"+srv.Addr()+"/api/import", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: %d", res.StatusCode)
+	}
+	var body struct{ Code, Message string }
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "import_password_required" {
+		t.Fatalf("expected code import_password_required, got %q", body.Code)
+	}
+}

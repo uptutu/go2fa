@@ -62,11 +62,11 @@ func New(addr string, v *vault.Vault, token string) (*Server, error) {
 		}
 	}
 	s := &Server{
-		v:        v,
-		addr:     addr,
-		token:    token,
-		mux:      http.NewServeMux(),
-		prefs:    prefStore{path: filepath.Join(dir, preferencesFile)},
+		v:     v,
+		addr:  addr,
+		token: token,
+		mux:   http.NewServeMux(),
+		prefs: prefStore{path: filepath.Join(dir, preferencesFile)},
 	}
 	s.lastActivity.Store(time.Now().Unix())
 	s.routes()
@@ -129,6 +129,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/code", s.handleCode)
 	s.mux.HandleFunc("/api/parse-otpauth", s.handleParseOtpauth)
 	s.mux.HandleFunc("/api/export", s.handleExport)
+	s.mux.HandleFunc("/api/import", s.handleImport)
+	// Bulk delete lives on its own path so the single-secret DELETE on
+	// /api/secrets/{id} can keep its URI template. Sub-resources (like
+	// /api/secrets/{id}/otpauth) wouldn't fit a verb-style extension.
+	s.mux.HandleFunc("/api/secrets/delete", s.handleSecretsDelete)
 	s.mux.HandleFunc("/api/mode", s.handleMode)
 	s.mux.HandleFunc("/api/preferences", s.handlePreferences)
 	// Catch-all: intercept index.html to inject the saved theme so first
@@ -274,6 +279,41 @@ func (s *Server) decodeErr(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
+// requireActionPassword re-checks the vault's master password for
+// destructive endpoints (add / delete / export / import). The vault is
+// already unlocked, so this is a step-up auth, not an unlock: it proves
+// the caller still knows the password rather than walking back to a
+// session that was left open.
+//
+// In no-password mode the check is a no-op: nothing to prove, no
+// password to ask for.
+//
+//	password == "" and mode == password -> 401 password_required
+//	  (lets the client distinguish missing-input from wrong-input so
+//	   it can prompt before re-submitting instead of bouncing blindly)
+//	otherwise VerifyCurrentPassword; on error -> 401 password_wrong
+func (s *Server) requireActionPassword(ctx context.Context, r *http.Request, w http.ResponseWriter, password string) bool {
+	m, err := s.v.LoadMeta(ctx)
+	if err != nil {
+		s.internalErr(w, r, err)
+		return false
+	}
+	if m.Mode != vault.ModePassword {
+		return true
+	}
+	if password == "" {
+		s.writeAPIError(w, http.StatusUnauthorized, "password_required",
+			"master password is required for this action")
+		return false
+	}
+	if err := s.v.VerifyCurrentPassword(ctx, password); err != nil {
+		s.writeAPIError(w, http.StatusUnauthorized, "password_wrong",
+			"master password is incorrect")
+		return false
+	}
+	return true
+}
+
 // notFoundOrInternalErr returns true if err was a clean "not found" (404);
 // otherwise it logs err and writes a generic 500, returning false.
 func (s *Server) notFoundOrInternalErr(w http.ResponseWriter, r *http.Request, err error, notFoundMsg string) bool {
@@ -409,6 +449,9 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 		readBounded(r, w, 64*1024)
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			s.decodeErr(w, err)
+			return
+		}
+		if !s.requireActionPassword(r.Context(), r, w, r.Header.Get("X-Action-Password")) {
 			return
 		}
 		var sec vault.Secret
@@ -558,6 +601,14 @@ func (s *Server) handleSecretItem(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, map[string]bool{"ok": true})
 	case http.MethodDelete:
+		// Step-up password re-auth: deleting a single secret from the
+		// edit dialog is just as destructive as bulk-deleting from the
+		// toolbar, so the same gate applies. Password comes via header
+		// to stay out of the URL (and out of access logs).
+		pw := r.Header.Get("X-Action-Password")
+		if !s.requireActionPassword(r.Context(), r, w, pw) {
+			return
+		}
 		if err := s.v.DeleteSecret(r.Context(), uid); err != nil {
 			s.internalErr(w, r, err)
 			return
@@ -672,11 +723,14 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Format   string   `json:"format"`
 		IDs      []string `json:"ids"`
-		Password string   `json:"password"`
+		Password string   `json:"password"` // file encryption password for .2fa
 	}
 	readBounded(r, w, 64*1024)
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		s.decodeErr(w, err)
+		return
+	}
+	if !s.requireActionPassword(r.Context(), r, w, r.Header.Get("X-Action-Password")) {
 		return
 	}
 	switch in.Format {
@@ -753,6 +807,153 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// handleImport accepts a multipart/form-data POST with a "file" field
+// (and optional "password" for encrypted formats) and merges its contents
+// into the vault. The format is auto-detected via importexport.Sniff, so
+// the UI does not have to pick a format up-front — just like `2fa import`
+// on the CLI. Returns the counts so the frontend can show a friendly
+// toast with skipped duplicates.
+//
+// File cap matches what the parser sees in practice: Aegis exports of a
+// few hundred entries sit under 100 KB, .2fa containers under a few MB.
+// 16 MB leaves plenty of headroom while bounding memory from an
+// authenticated caller.
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if !s.gate(r, w) {
+
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	const maxFile = 16 << 20 // 16 MiB
+	if err := r.ParseMultipartForm(maxFile); err != nil {
+		s.writeAPIError(w, http.StatusBadRequest, "import_bad_form", err.Error())
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		s.writeAPIError(w, http.StatusBadRequest, "import_no_file", "missing file field")
+		return
+	}
+	defer file.Close()
+	buf, err := io.ReadAll(io.LimitReader(file, maxFile+1))
+	if err != nil {
+		s.internalErr(w, r, err)
+		return
+	}
+	if len(buf) > maxFile {
+		s.writeAPIError(w, http.StatusRequestEntityTooLarge, "import_too_large", "file too large (max 16 MiB)")
+		return
+	}
+	password := r.FormValue("password")
+	format := importexport.Sniff(buf)
+	// Vault master password rides in a dedicated header so it cannot
+	// collide with `password` (the file-encryption password for .2fa /
+	// encrypted Aegis). See handleExport's `Password` field for the
+	// same reason.
+	if !s.requireActionPassword(r.Context(), r, w, r.Header.Get("X-Action-Password")) {
+		return
+	}
+	if format == importexport.FormatUnknown {
+		s.writeAPIError(w, http.StatusBadRequest, "import_unknown",
+			"unrecognized format: expected .2fa, Aegis JSON, or otpauth:// URI list")
+		return
+	}
+	if (format == importexport.Format2FA || format == importexport.FormatAegisEncrypted) && password == "" {
+		s.writeAPIError(w, http.StatusBadRequest, "import_password_required",
+			"this file is encrypted; a password is required")
+		return
+	}
+	res, err := importexport.Import(buf, password)
+	if err != nil {
+		s.writeAPIError(w, http.StatusBadRequest, "import_decrypt_failed", err.Error())
+		return
+	}
+	st, err := importexport.MergeIntoVault(r.Context(), s.v, res)
+	if err != nil {
+		s.internalErr(w, r, err)
+		return
+	}
+	s.writeJSON(w, map[string]any{
+		"format":  formatString(format),
+		"added":   st.Added,
+		"skipped": st.Skipped,
+		"groups":  st.Groups,
+	})
+}
+
+// formatString returns a short label for a detected import format. Kept
+// stable so the frontend can show it in the toast.
+func formatString(f importexport.Format) string {
+	switch f {
+	case importexport.Format2FA:
+		return ".2fa"
+	case importexport.FormatAegisPlain:
+		return "aegis"
+	case importexport.FormatAegisEncrypted:
+		return "aegis-encrypted"
+	case importexport.FormatOtpauth:
+		return "otpauth"
+	}
+	return "unknown"
+}
+
+// handleSecretsDelete bulk-deletes the supplied secret IDs. The frontend
+// uses this from the "Delete selected" toolbar action; the single-secret
+// delete stays on /api/secrets/{id} for the edit dialog. Bulk and single
+// share the same step-up password gate via X-Action-Password.
+//
+// Empty/missing IDs are rejected up front so a buggy client can't issue
+// a "delete everything" by accident. IDs that don't resolve (already
+// deleted by another tab, stale selection) are silently skipped — the
+// single-secret handler treats sql.ErrNoRows as a 404, but here a
+// partial-success is friendlier than a hard failure.
+func (s *Server) handleSecretsDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.gate(r, w) {
+
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	readBounded(r, w, 16*1024)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		s.decodeErr(w, err)
+		return
+	}
+	if !s.requireActionPassword(r.Context(), r, w, r.Header.Get("X-Action-Password")) {
+		return
+	}
+	if len(in.IDs) == 0 {
+		s.writeErr(w, http.StatusBadRequest, "ids required")
+		return
+	}
+	deleted := 0
+	for _, idStr := range in.IDs {
+		uid, err := uuid.Parse(idStr)
+		if err != nil {
+			// Skip unparseable IDs rather than failing the whole batch —
+			// a stale selection shouldn't block deletion of the others.
+			continue
+		}
+		if err := s.v.DeleteSecret(r.Context(), uid); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			s.internalErr(w, r, err)
+			return
+		}
+		deleted++
+	}
+	s.writeJSON(w, map[string]any{"deleted": deleted, "requested": len(in.IDs)})
+}
+
 // handleMode switches the vault between password and no-password mode.
 // Backed by Vault.SetPassword / DisablePassword, which re-encrypt every
 // row under the new KEK. The vault must be unlocked — Lock() zeroing the
@@ -787,9 +988,9 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Mode           string `json:"mode"`
-		Password       string `json:"password"`
-		Confirm        string `json:"confirm"`
+		Mode            string `json:"mode"`
+		Password        string `json:"password"`
+		Confirm         string `json:"confirm"`
 		CurrentPassword string `json:"current_password"`
 	}
 	readBounded(r, w, 16*1024)

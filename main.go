@@ -610,43 +610,12 @@ var cmdImport = &cobra.Command{
 			return err
 		}
 		defer v.Close()
-		ctx := context.Background()
-		gid := map[string]int64{}
-		existingGroups, _ := v.ListGroups(ctx)
-		for _, g := range existingGroups {
-			gid[g.Name] = g.ID
-		}
-		for _, g := range res.Groups {
-			if _, ok := gid[g.Name]; ok {
-				continue
-			}
-			newID, err := v.CreateGroup(ctx, g)
-			if err != nil {
-				return err
-			}
-			gid[g.Name] = newID
-		}
-		// Skip duplicates: same issuer+account already stored under a
-		// different UUID (typical when re-importing an otpauth:// list, which
-		// carries no UUIDs). Entries that keep their original UUID still
-		// upsert, so re-importing an Aegis/.2fa export updates in place.
-		existingSecrets, _ := v.ListSecrets(ctx)
-		have := make(map[string]uuid.UUID, len(existingSecrets))
-		for _, es := range existingSecrets {
-			have[es.Issuer+"\x00"+es.Account] = es.ID
-		}
-		skipped := 0
-		for _, s := range res.Secrets {
-			if id, ok := have[s.Issuer+"\x00"+s.Account]; ok && id != s.ID {
-				skipped++
-				continue
-			}
-			if err := v.UpsertSecret(ctx, s); err != nil {
-				return err
-			}
+		st, err := importexport.MergeIntoVault(context.Background(), v, res)
+		if err != nil {
+			return err
 		}
 		fmt.Fprintf(os.Stdout, "imported %d secrets (%d duplicates skipped), %d groups\n",
-			len(res.Secrets)-skipped, skipped, len(res.Groups))
+			st.Added, st.Skipped, st.Groups)
 		return nil
 	},
 }
