@@ -6,9 +6,16 @@
 <meta name="color-scheme" content="dark light">
 <title>2fa — TOTP Vault</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script>
+  try {
+    var t = localStorage.getItem('go2fa.theme') || 'aurora';
+    document.documentElement.setAttribute('data-theme', t);
+  } catch (_) {}
+</script>
 <style>
   /* -------- Tokens -------- */
-  :root {
+  :root,
+  [data-theme="aurora"] {
     color-scheme: dark;
     --bg: #06080c;
     /* Liquid glass base tint — slightly cool, very low alpha so background blobs bleed through */
@@ -57,8 +64,11 @@
     --mx: 50%;
     --my: 30%;
   }
+  /* Only follow the system light scheme when no theme is explicitly picked
+     or when aurora (the default) is active. */
   @media (prefers-color-scheme: light) {
-    :root {
+    :root:not([data-theme]),
+    [data-theme="aurora"] {
       color-scheme: light;
       --bg: #dde6e1;
       --glass: rgba(255,255,255,0.55);
@@ -90,6 +100,196 @@
         0 16px 40px -20px rgba(14,158,99,0.20);
     }
   }
+
+  /* -------- Theme presets -------- */
+  /* Obsidian —— 冷灰蓝,玻璃更克制,blob 几乎不可见 */
+  [data-theme="obsidian"] {
+    color-scheme: dark;
+    --bg: #0c1014;
+    --glass: rgba(255,255,255,0.04);
+    --glass-2: rgba(255,255,255,0.08);
+    --border: rgba(255,255,255,0.10);
+    --border-strong: rgba(255,255,255,0.22);
+    --topline: inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.22);
+    --dialog-bg: rgba(12,18,22,0.62);
+    --text: #e4ecf3;
+    --text-dim: #8b9ba8;
+    --text-faint: #5a6878;
+    --accent: #7dd3fc;
+    --accent-2: #818cf8;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 24px 48px -12px rgba(0,0,0,0.55),
+      0 8px 20px -8px rgba(125,211,252,0.10);
+    --shadow-lg:
+      0 1px 0 rgba(255,255,255,0.08) inset,
+      0 40px 80px -20px rgba(0,0,0,0.65),
+      0 16px 40px -16px rgba(129,140,248,0.18);
+    --blur: blur(28px) saturate(140%);
+  }
+  [data-theme="obsidian"] .b1,
+  [data-theme="obsidian"] .b2,
+  [data-theme="obsidian"] .b3 { opacity: 0.30; }
+
+  /* Dusk Violet */
+  [data-theme="dusk"] {
+    color-scheme: dark;
+    --bg: #0d0b18;
+    --glass: rgba(255,255,255,0.07);
+    --glass-2: rgba(255,255,255,0.13);
+    --border: rgba(255,255,255,0.12);
+    --border-strong: rgba(255,255,255,0.24);
+    --dialog-bg: rgba(18,12,28,0.62);
+    --text: #f1ebff;
+    --text-dim: #a99ec4;
+    --text-faint: #6e6485;
+    --accent: #c4a7ff;
+    --accent-2: #ff9bcb;
+    --good: #86efac;
+    --warn: #fcd34d;
+    --danger: #fb7185;
+    --shadow:
+      0 1px 0 rgba(255,255,255,0.06) inset,
+      0 24px 48px -12px rgba(0,0,0,0.55),
+      0 8px 20px -8px rgba(196,167,255,0.12);
+    --shadow-lg:
+      0 1px 0 rgba(255,255,255,0.10) inset,
+      0 40px 80px -20px rgba(0,0,0,0.65),
+      0 16px 40px -16px rgba(255,155,203,0.20);
+    --blur: blur(30px) saturate(180%);
+  }
+  [data-theme="dusk"] .b1 { background: radial-gradient(circle, rgba(196,167,255,0.35), transparent 70%); }
+  [data-theme="dusk"] .b2 { background: radial-gradient(circle, rgba(255,155,203,0.30), transparent 70%); }
+  [data-theme="dusk"] .b3 { background: radial-gradient(circle, rgba(140,120,255,0.22), transparent 70%); }
+
+  /* Paper Light —— 单套亮色 */
+  [data-theme="paper"] {
+    color-scheme: light;
+    --bg: #f3efe7;
+    --glass: rgba(255,255,255,0.55);
+    --glass-2: rgba(255,255,255,0.78);
+    --border: rgba(20,40,32,0.12);
+    --border-strong: rgba(20,40,32,0.24);
+    --topline: inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(20,40,32,0.06);
+    --refract:
+      conic-gradient(from calc(var(--mx,50%) * 1deg) at calc(var(--mx,50%)) calc(var(--my,30%)),
+        rgba(255,255,255,0) 0deg,
+        rgba(255,255,255,0.45) 30deg,
+        rgba(255,255,255,0) 60deg,
+        rgba(255,255,255,0) 300deg,
+        rgba(255,255,255,0.40) 330deg,
+        rgba(255,255,255,0) 360deg);
+    --dialog-bg: rgba(255,255,255,0.72);
+    --text: #1f2a23;
+    --text-dim: #4d5e54;
+    --text-faint: #7a8a82;
+    --accent: #2f7d4f;
+    --accent-2: #1a4d6e;
+    --good: #16a34a;
+    --warn: #b45309;
+    --danger: #b91c1c;
+    --shadow:
+      0 1px 0 rgba(255,255,255,0.85) inset,
+      0 24px 48px -16px rgba(30,60,45,0.18),
+      0 8px 20px -10px rgba(47,125,79,0.14);
+    --shadow-lg:
+      0 1px 0 rgba(255,255,255,0.95) inset,
+      0 40px 80px -24px rgba(30,60,45,0.26),
+      0 16px 40px -20px rgba(47,125,79,0.18);
+    --blur: blur(24px) saturate(150%);
+  }
+  [data-theme="paper"] .b1 { background: radial-gradient(circle, rgba(47,125,79,0.20), transparent 70%); }
+  [data-theme="paper"] .b2 { background: radial-gradient(circle, rgba(26,77,110,0.15), transparent 70%); }
+  [data-theme="paper"] .b3 { background: radial-gradient(circle, rgba(180,83,9,0.10), transparent 70%); }
+  [data-theme="paper"] .b1,
+  [data-theme="paper"] .b2,
+  [data-theme="paper"] .b3 { opacity: 0.40; }
+  /* Paper is always light: map the light-only scrim / input surfaces that the
+     aurora light scheme gets from the media query above. */
+  [data-theme="paper"] .scrim { background: rgba(220,230,225,0.35); }
+  [data-theme="paper"] .field input, [data-theme="paper"] .field select, [data-theme="paper"] .field textarea {
+    background: linear-gradient(180deg, color-mix(in srgb, white 60%, transparent), color-mix(in srgb, white 78%, transparent));
+  }
+
+  /* Ember Sunset */
+  [data-theme="ember"] {
+    color-scheme: dark;
+    --bg: #140a08;
+    --glass: rgba(255,255,255,0.05);
+    --glass-2: rgba(255,255,255,0.10);
+    --border: rgba(255,255,255,0.12);
+    --border-strong: rgba(255,255,255,0.22);
+    --dialog-bg: rgba(28,16,12,0.62);
+    --text: #fbecd9;
+    --text-dim: #b89a82;
+    --text-faint: #826452;
+    --accent: #ff9966;
+    --accent-2: #ffb86b;
+    --good: #fbbf24;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --shadow:
+      0 1px 0 rgba(255,255,255,0.06) inset,
+      0 24px 48px -12px rgba(0,0,0,0.55),
+      0 8px 20px -8px rgba(255,153,102,0.14);
+    --shadow-lg:
+      0 1px 0 rgba(255,255,255,0.08) inset,
+      0 40px 80px -20px rgba(0,0,0,0.65),
+      0 16px 40px -16px rgba(255,184,107,0.20);
+    --blur: blur(30px) saturate(160%);
+  }
+  [data-theme="ember"] .b1 { background: radial-gradient(circle, rgba(255,153,102,0.35), transparent 70%); }
+  [data-theme="ember"] .b2 { background: radial-gradient(circle, rgba(255,184,107,0.28), transparent 70%); }
+  [data-theme="ember"] .b3 { background: radial-gradient(circle, rgba(245,158,11,0.22), transparent 70%); }
+
+  /* Mono —— 玻璃退化为细描边,blob 关掉 */
+  [data-theme="mono"] {
+    color-scheme: dark;
+    --bg: #0a0a0a;
+    --glass: rgba(255,255,255,0.02);
+    --glass-2: rgba(255,255,255,0.05);
+    --border: rgba(255,255,255,0.18);
+    --border-strong: rgba(255,255,255,0.32);
+    --topline: inset 0 1px 0 rgba(255,255,255,0.08);
+    --refract: none;
+    --dialog-bg: rgba(15,15,15,0.85);
+    --text: #f0f0f0;
+    --text-dim: #a0a0a0;
+    --text-faint: #6a6a6a;
+    --accent: #c0c6c0;
+    --accent-2: #9aa39a;
+    --good: #c0c6c0;
+    --warn: #c0c6c0;
+    --danger: #ff6b6b;
+    --shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 2px 0 rgba(0,0,0,0.55);
+    --shadow-lg:
+      0 1px 0 rgba(255,255,255,0.06) inset,
+      0 4px 0 rgba(0,0,0,0.55);
+    --blur: blur(0);
+  }
+  @media (prefers-color-scheme: light) {
+    [data-theme="mono"] {
+      color-scheme: light;
+      --bg: #ffffff;
+      --glass: rgba(0,0,0,0.02);
+      --glass-2: rgba(0,0,0,0.04);
+      --border: rgba(0,0,0,0.18);
+      --border-strong: rgba(0,0,0,0.32);
+      --text: #0a0a0a;
+      --text-dim: #555555;
+      --text-faint: #8a8a8a;
+    }
+  }
+  [data-theme="mono"] .b1,
+  [data-theme="mono"] .b2,
+  [data-theme="mono"] .b3 { display: none; }
+  [data-theme="mono"] .glass::before,
+  [data-theme="mono"] .glass::after { display: none; }
 
   /* -------- Base -------- */
   *, *::before, *::after { box-sizing: border-box; }
@@ -623,7 +823,8 @@
     text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   @media (prefers-color-scheme: light) {
-    .code { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, white), color-mix(in srgb, var(--accent) 3%, white)); }
+    :root:not([data-theme]) .code,
+    [data-theme="aurora"] .code { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, white), color-mix(in srgb, var(--accent) 3%, white)); }
   }
   .code:hover {
     border-color: var(--accent);
@@ -703,7 +904,8 @@
     transition: opacity .22s;
   }
   @media (prefers-color-scheme: light) {
-    .scrim { background: rgba(220,230,225,0.35); }
+    :root:not([data-theme]) .scrim,
+    [data-theme="aurora"] .scrim { background: rgba(220,230,225,0.35); }
   }
   .scrim.show { opacity: 1; pointer-events: auto; }
   .dialog {
@@ -822,7 +1024,8 @@
   }
   .qr-hint { margin: 0; font-size: 11px; color: var(--text-faint); }
   @media (prefers-color-scheme: light) {
-    .field input, .field select, .field textarea {
+    :root:not([data-theme]) .field input, :root:not([data-theme]) .field select, :root:not([data-theme]) .field textarea,
+    [data-theme="aurora"] .field input, [data-theme="aurora"] .field select, [data-theme="aurora"] .field textarea {
       background: linear-gradient(180deg, color-mix(in srgb, white 60%, transparent), color-mix(in srgb, white 78%, transparent));
     }
   }
@@ -889,6 +1092,234 @@
     to { opacity: 1; transform: none; }
   }
 
+  /* -------- Secret detail panel (inline expansion) -------- */
+  .secret {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Whole row is the expand toggle; these sub-areas keep their own handlers */
+  .secret .who,
+  .secret .code-wrap,
+  .secret .ring {
+    pointer-events: none;
+  }
+  .secret .pick,
+  .secret .row-actions,
+  .secret .code {
+    pointer-events: auto;
+  }
+  .secret.expanded {
+    background: var(--glass-2);
+    box-shadow: var(--topline), 0 14px 28px -10px rgba(0,0,0,0.45),
+      0 4px 14px -8px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .secret.expanded .pick { opacity: 1; }
+
+  /* Detail region: grid-rows 0fr→1fr animates without layout jitter */
+  .secret .detail {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows .25s cubic-bezier(.2,.8,.2,1), opacity .2s;
+  }
+  .secret .detail > .detail-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .secret.expanded .detail {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .detail-grid {
+    display: grid;
+    gap: 16px;
+    padding: 16px 4px 4px;
+    border-top: 1px dashed var(--border);
+  }
+  .detail-grid .label {
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .detail-grid .account-big {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--text);
+    cursor: copy;
+    width: fit-content;
+    padding: 2px 6px;
+    margin: -2px -6px;
+    border-radius: 8px;
+    transition: background .15s, color .15s;
+  }
+  .detail-grid .account-big:hover {
+    background: var(--glass-2);
+    color: var(--accent);
+  }
+  .detail-grid .meta-row {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+  }
+  .detail-grid .meta-row > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .detail-grid .meta-row .value {
+    font-size: 13px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .detail-code-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .detail-code {
+    font-family: var(--mono);
+    font-size: 38px;
+    letter-spacing: 4px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    padding: 14px 22px;
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      color-mix(in srgb, var(--accent) 4%, transparent));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    user-select: all;
+    text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 45%, transparent);
+    transition: border-color .2s, box-shadow .2s, transform .15s;
+  }
+  .detail-code:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+      0 0 28px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .detail-code.copied {
+    background: color-mix(in srgb, var(--good) 22%, transparent);
+    border-color: var(--good);
+    color: var(--good);
+  }
+  .detail-code-row .timer {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .detail-code-row .timer svg { width: 12px; height: 12px; }
+  .detail-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .detail-notes {
+    white-space: pre-wrap;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.55;
+    padding: 10px 14px;
+    background: var(--glass-2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    cursor: copy;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .detail-notes:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  @media (max-width: 640px) {
+    .detail-code { font-size: 30px; padding: 12px 18px; }
+    .detail-grid .meta-row { gap: 14px; }
+  }
+
+  /* -------- Theme picker popover -------- */
+  .theme-pop {
+    position: fixed;
+    top: 64px;
+    right: 18px;
+    width: 296px;
+    padding: 10px;
+    background: var(--dialog-bg);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border-strong);
+    border-radius: 18px;
+    box-shadow: var(--shadow-lg);
+    z-index: 80;
+    transform-origin: top right;
+    animation: pop-in .22s cubic-bezier(.2, .9, .3, 1.2);
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.94) translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+  .theme-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .theme-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    min-height: 44px; /* touch target */
+    border-radius: 12px;
+    background: var(--glass);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: background .2s, border-color .2s, color .2s, transform .15s;
+  }
+  .theme-card:hover {
+    background: var(--glass-2);
+    color: var(--text);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+  }
+  .theme-card[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--glass));
+    box-shadow:
+      var(--topline),
+      0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent) inset;
+    color: var(--text);
+  }
+  .theme-card .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--swatch);
+    box-shadow: 0 0 8px var(--swatch);
+  }
+  .theme-card .name { font-weight: 600; }
+  .theme-card .hint {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .theme-card[aria-pressed="true"] .hint { color: var(--accent); }
+
   /* -------- Reduced motion -------- */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -927,6 +1358,12 @@
       <input id="q" type="search" data-i18n-placeholder="search_placeholder" autocomplete="off" spellcheck="false">
     </label>
     <span id="status" class="status" aria-live="polite"><span class="dot"></span><span class="label">…</span><span class="addr"></span></span>
+    <button id="theme-btn" class="btn ghost" type="button" aria-haspopup="dialog" aria-expanded="false" data-i18n-aria="theme_aria" data-i18n-title="theme_aria">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18"/>
+      </svg>
+      <span id="theme-current">Aurora</span>
+    </button>
     <div class="lang-switch" role="group" data-i18n-aria="lang_switch_aria">
       <button type="button" data-lang="en" aria-pressed="true">EN</button>
       <button type="button" data-lang="zh" aria-pressed="false">中</button>
@@ -969,6 +1406,42 @@
     </div>
   </main>
 
+</div>
+
+<!-- Theme picker popover -->
+<div id="theme-pop" class="theme-pop" hidden role="dialog" aria-label="Choose theme" data-i18n-aria="theme_pop_aria">
+  <div class="theme-grid">
+    <button class="theme-card" type="button" data-theme="aurora" aria-pressed="true">
+      <span class="swatch" style="--swatch:#7cf7b1"></span>
+      <span class="name">Aurora Mint</span>
+      <span class="hint">Default</span>
+    </button>
+    <button class="theme-card" type="button" data-theme="obsidian" aria-pressed="false">
+      <span class="swatch" style="--swatch:#7dd3fc"></span>
+      <span class="name">Obsidian Slate</span>
+      <span class="hint">Cool</span>
+    </button>
+    <button class="theme-card" type="button" data-theme="dusk" aria-pressed="false">
+      <span class="swatch" style="--swatch:#c4a7ff"></span>
+      <span class="name">Dusk Violet</span>
+      <span class="hint">Warm</span>
+    </button>
+    <button class="theme-card" type="button" data-theme="paper" aria-pressed="false">
+      <span class="swatch" style="--swatch:#2f7d4f"></span>
+      <span class="name">Paper Light</span>
+      <span class="hint">Daytime</span>
+    </button>
+    <button class="theme-card" type="button" data-theme="ember" aria-pressed="false">
+      <span class="swatch" style="--swatch:#ff9966"></span>
+      <span class="name">Ember Sunset</span>
+      <span class="hint">Cozy</span>
+    </button>
+    <button class="theme-card" type="button" data-theme="mono" aria-pressed="false">
+      <span class="swatch" style="--swatch:#9aa39a"></span>
+      <span class="name">Mono Editorial</span>
+      <span class="hint">Minimal</span>
+    </button>
+  </div>
 </div>
 
 <!-- Add / Edit dialog -->

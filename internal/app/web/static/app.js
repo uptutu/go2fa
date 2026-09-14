@@ -100,6 +100,16 @@ const dict = {
     qr_aria: 'Show QR code for {issuer}',
     qr_copied: 'URI copied',
     copy: 'Copy',
+    theme_aria: 'Theme',
+    theme_pop_aria: 'Choose theme',
+    detail_account: 'Account',
+    detail_algo: 'Algorithm',
+    detail_digits: 'Digits',
+    detail_period: 'Period',
+    detail_code_aria: 'Copy current code, {digits} digits',
+    detail_notes: 'Notes',
+    qr_show: 'Show QR',
+    refresh_now: 'Refresh',
   },
   zh: {
     app_title: '2fa — TOTP 金库',
@@ -192,6 +202,16 @@ const dict = {
     qr_aria: '显示 {issuer} 的二维码',
     qr_copied: 'URI 已复制',
     copy: '复制',
+    theme_aria: '主题',
+    theme_pop_aria: '选择主题',
+    detail_account: '账号',
+    detail_algo: '算法',
+    detail_digits: '位数',
+    detail_period: '周期',
+    detail_code_aria: '复制当前验证码,共 {digits} 位',
+    detail_notes: '备注',
+    qr_show: '显示二维码',
+    refresh_now: '立即刷新',
   },
 };
 
@@ -296,6 +316,64 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[c]);
+}
+
+/* -------- Theme picker --------
+ * Token-driven: picking a theme just rewrites data-theme on <html>; all
+ * component styles read from CSS variables, so nothing else changes.
+ * The <head> inline script already set data-theme before first paint, so
+ * here we only sync UI state (button label, pressed card).
+ */
+const THEMES = ['aurora', 'obsidian', 'dusk', 'paper', 'ember', 'mono'];
+const THEME_LABELS = {
+  aurora: 'Aurora', obsidian: 'Obsidian', dusk: 'Dusk',
+  paper: 'Paper', ember: 'Ember', mono: 'Mono',
+};
+const themeRoot = document.documentElement;
+const themeBtn = $('#theme-btn');
+const themePop = $('#theme-pop');
+const themeCurrent = $('#theme-current');
+
+function applyTheme(id, { persist = true } = {}) {
+  if (!THEMES.includes(id)) id = 'aurora';
+  themeRoot.setAttribute('data-theme', id);
+  if (persist) {
+    try { localStorage.setItem('go2fa.theme', id); } catch (_) { /* private mode */ }
+  }
+  if (themeCurrent) themeCurrent.textContent = THEME_LABELS[id];
+  $$('.theme-card').forEach((c) =>
+    c.setAttribute('aria-pressed', String(c.dataset.theme === id)));
+}
+
+applyTheme(themeRoot.getAttribute('data-theme') || 'aurora', { persist: false });
+
+if (themeBtn && themePop) {
+  themeBtn.addEventListener('click', () => {
+    const open = !themePop.hidden;
+    themePop.hidden = open;
+    themeBtn.setAttribute('aria-expanded', String(!open));
+  });
+  document.addEventListener('click', (e) => {
+    if (themePop.hidden) return;
+    if (e.target.closest('#theme-pop, #theme-btn')) return;
+    themePop.hidden = true;
+    themeBtn.setAttribute('aria-expanded', 'false');
+  });
+  themePop.addEventListener('click', (e) => {
+    const c = e.target.closest('.theme-card');
+    if (!c) return;
+    applyTheme(c.dataset.theme);
+    themePop.hidden = true;
+    themeBtn.setAttribute('aria-expanded', 'false');
+    themeBtn.focus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !themePop.hidden) {
+      themePop.hidden = true;
+      themeBtn.setAttribute('aria-expanded', 'false');
+      themeBtn.focus();
+    }
+  });
 }
 
 function fmtAlgo(a) {
@@ -459,6 +537,9 @@ function updateRowCountdown(li, s) {
     prog.setAttribute('stroke-dashoffset',
       (RING_LEN * (1 - Math.max(0, s.remaining) / s.period)).toFixed(2));
   }
+  // Keep the expanded detail panel's timer in the same tick — no separate timer.
+  const detSec = li.querySelector('.detail .sec');
+  if (detSec && detSec.textContent !== String(s.remaining)) detSec.textContent = String(s.remaining);
 }
 
 function updateRow(li, s) {
@@ -481,12 +562,51 @@ function updateRow(li, s) {
   const on = state.selected.has(s.id);
   if (cb.checked !== on) cb.checked = on;
   updateRowCountdown(li, s);
+  fillDetail(li, s);
+}
+
+// Fill the inline detail panel from the same `s` the row uses — no extra
+// request, so the panel can never disagree with the row about the code.
+// Fields with no data are hidden wholesale (label included).
+function fillDetail(li, s) {
+  const det = $('.detail', li);
+  if (!det) return;
+
+  const accField = $('.detail-field-account', det);
+  if (s.account && s.account.trim()) {
+    accField.hidden = false;
+    $('.account-big', accField).textContent = s.account;
+  } else {
+    accField.hidden = true;
+  }
+
+  const metaValues = $$('.meta-row > div .value', det);
+  metaValues[0].textContent = fmtAlgo(s.algorithm);
+  metaValues[1].textContent = String(s.digits);
+  metaValues[2].textContent = s.period + 's';
+
+  const codeText = $('.detail-code .code-text', det);
+  const fmt = codeFmt(s);
+  if (codeText.textContent !== fmt) codeText.textContent = fmt;
+  $('.detail-code', det).setAttribute('aria-label',
+    t('detail_code_aria', { digits: String(s.digits || 6) }));
+
+  const notesField = $('.detail-field-notes', det);
+  if (s.notes && s.notes.trim()) {
+    notesField.hidden = false;
+    $('.detail-notes', notesField).textContent = s.notes;
+  } else {
+    notesField.hidden = true;
+  }
 }
 
 function createRow(s) {
   const li = document.createElement('li');
   li.className = 'secret';
   li.dataset.id = s.id;
+  li.tabIndex = 0;
+  li.setAttribute('role', 'button');
+  li.setAttribute('aria-expanded', 'false');
   if (s.remaining <= 0) li.classList.add('expired');
   else if (s.remaining <= 5) li.classList.add('expiring');
 
@@ -522,6 +642,34 @@ function createRow(s) {
         <button class="icon-btn edit" type="button" aria-label="${escapeHtml(t('edit_aria', { issuer: s.issuer }))}" title="${escapeHtml(t('edit_title_attr'))}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
         </button>
+      </div>
+      <div class="detail">
+        <div class="detail-inner">
+          <div class="detail-grid">
+            <div class="detail-field-account" ${s.account && s.account.trim() ? '' : 'hidden'}>
+              <div class="label">${escapeHtml(t('detail_account'))}</div>
+              <div class="account-big" title="${escapeHtml(t('copy_title_attr'))}">${escapeHtml(s.account || '')}</div>
+            </div>
+            <div class="meta-row">
+              <div><span class="label">${escapeHtml(t('detail_algo'))}</span><span class="value">${escapeHtml(fmtAlgo(s.algorithm))}</span></div>
+              <div><span class="label">${escapeHtml(t('detail_digits'))}</span><span class="value">${s.digits}</span></div>
+              <div><span class="label">${escapeHtml(t('detail_period'))}</span><span class="value">${s.period}s</span></div>
+            </div>
+            <div class="detail-code-row">
+              <div class="detail-code" tabindex="0" role="button" aria-label="${escapeHtml(t('detail_code_aria', { digits: String(s.digits || 6) }))}"><span class="code-text">${escapeHtml(fmt)}</span></div>
+              <span class="timer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="sec">${Math.max(0, s.remaining)}</span>s</span>
+              <div class="detail-actions">
+                <button class="btn d-copy" type="button">${escapeHtml(t('copy'))}</button>
+                <button class="btn d-qr qr-btn" type="button" data-id="${escapeHtml(s.id)}">${escapeHtml(t('qr_show'))}</button>
+                <button class="btn d-refresh" type="button">${escapeHtml(t('refresh_now'))}</button>
+              </div>
+            </div>
+            <div class="detail-field-notes" ${s.notes && s.notes.trim() ? '' : 'hidden'}>
+              <div class="label">${escapeHtml(t('detail_notes'))}</div>
+              <div class="detail-notes" title="${escapeHtml(t('copy_title_attr'))}">${escapeHtml(s.notes || '')}</div>
+            </div>
+          </div>
+        </div>
       </div>`;
 
     const codeBtn = $('.code', li);
@@ -532,6 +680,27 @@ function createRow(s) {
       if (on) state.selected.add(s.id); else state.selected.delete(s.id);
       updateSelectionUI();
     };
+  // Detail panel: copy (big code or button), refresh via the normal diff-refresh
+  // (race-free, same data source as the row). QR reuses the existing .qr-btn
+  // delegation, so no wiring needed here.
+  $('.detail-code', li).addEventListener('click', () => copyDetailCode(li, s.id));
+  $('.d-copy', li).addEventListener('click', () => copyDetailCode(li, s.id));
+  $('.d-refresh', li).addEventListener('click', () => { refreshSecrets(); });
+  // Account / Notes are click-to-copy — selecting them by drag is fiddly.
+  $('.account-big', li).addEventListener('click', (e) => {
+    const txt = e.currentTarget.textContent.trim();
+    if (txt) copyText(txt);
+  });
+  $('.detail-notes', li).addEventListener('click', (e) => {
+    const txt = e.currentTarget.textContent.trim();
+    if (txt) copyText(txt);
+  });
+  li.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === li) {
+      e.preventDefault();
+      if (!document.body.classList.contains('selecting')) toggleExpand(s.id);
+    }
+  });
   updateRowCountdown(li, s);
   secretsUl.appendChild(li);
   return li;
@@ -609,6 +778,65 @@ async function copyCode(id, btn) {
       if (fresh && fresh.remaining > 0) btn.textContent = codeFmt(fresh);
       else if (!fresh) btn.textContent = previous; // fallback if the row was removed
     }, 900);
+  } catch (e) {
+    toast(t('toast_copy_failed', { err: e.message }), 'bad');
+  }
+}
+
+// Copy plain text (account / notes) with the standard toast feedback.
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(
+    () => toast(t('toast_copied'), 'good'),
+    (e) => toast(t('toast_copy_failed', { err: e.message }), 'bad'),
+  );
+}
+
+/* -------- Inline detail expansion --------
+ * One expanded row at a time. Closing: same row again, click elsewhere is a
+ * no-op (only one open), ESC, or opening another row. Selection mode and
+ * sub-controls (.pick / .row-actions / .code / .detail) never expand.
+ */
+let expandedId = null;
+
+function toggleExpand(id) {
+  expandedId = expandedId === id ? null : id;
+  $$('.secret', secretsUl).forEach((r) => {
+    const open = r.dataset.id === expandedId;
+    r.classList.toggle('expanded', open);
+    r.setAttribute('aria-expanded', String(open));
+  });
+}
+
+// Delegated whole-row toggle. Attach once; the diff-render keeps rows alive.
+secretsUl.addEventListener('click', (e) => {
+  const row = e.target.closest('.secret');
+  if (!row) return;
+  if (e.target.closest('.pick, .row-actions, .code, .detail')) return;
+  if (document.body.classList.contains('selecting')) return;
+  toggleExpand(row.dataset.id);
+});
+
+document.addEventListener('keydown', (e) => {
+  // Don't collapse a row while a modal is open — ESC belongs to the modal.
+  if (e.key === 'Escape' && expandedId && !$('.scrim.show') && themePop.hidden) toggleExpand(expandedId);
+});
+
+// Copy from the detail panel: same race-free pattern as copyCode (fetch first
+// if the code just rotated), but flashes .detail-code instead of the row button
+// so the panel's span structure is never overwritten.
+async function copyDetailCode(li, id) {
+  const cur = state.secrets.find((x) => x.id === id);
+  if (cur && cur.remaining <= 0) await refreshSecrets();
+  const code = ($('.detail-code .code-text', li)?.textContent || '').trim();
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    const el = $('.detail-code', li);
+    el.classList.add('copied');
+    // server-side touch (last_used) — fire and forget
+    try { api(`/api/code?id=${encodeURIComponent(id)}`); } catch (_) { /* ignore */ }
+    toast(t('toast_copied'), 'good');
+    setTimeout(() => el.classList.remove('copied'), 900);
   } catch (e) {
     toast(t('toast_copy_failed', { err: e.message }), 'bad');
   }
