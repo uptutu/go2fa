@@ -55,6 +55,11 @@ func Parse(s string) (URI, error) {
 	} else {
 		account = urlDecode(rawLabel)
 	}
+	// Trailing colon with empty account ("Issuer:") is valid per the spec;
+	// some exporters emit it when the user has an issuer but no account.
+	if issuer != "" && account == "" && rawLabel != "" && strings.HasSuffix(rawLabel, ":") {
+		// already parsed correctly; keep issuer, leave account empty
+	}
 	q := u.Query()
 	if q.Get("secret") == "" {
 		return URI{}, errors.New("otpauth: missing secret")
@@ -86,7 +91,7 @@ func Parse(s string) (URI, error) {
 			account = account[i+1:]
 		}
 	}
-	if account == "" {
+	if account == "" && issuer == "" {
 		return URI{}, errors.New("otpauth: missing account")
 	}
 	return URI{

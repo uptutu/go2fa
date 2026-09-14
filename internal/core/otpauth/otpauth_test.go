@@ -86,6 +86,27 @@ func TestStringRoundtrip(t *testing.T) {
 		t.Errorf("roundtrip mismatch: %+v", out)
 	}
 }
+func TestParseEmptyAccountWithIssuer(t *testing.T) {
+	// Some exporters emit "Issuer:" with no account slot; spec allows it.
+	cases := []string{
+		"otpauth://totp/BigCorp:?secret=JBSWY3DPEHPK3PXP",
+		"otpauth://totp/BigCorp:?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
+	}
+	for _, c := range cases {
+		u, err := Parse(c)
+		if err != nil {
+			t.Errorf("expected accept for %q, got %v", c, err)
+			continue
+		}
+		if u.Issuer == "" {
+			t.Errorf("expected issuer, got empty for %q", c)
+		}
+	}
+	if _, err := Parse("otpauth://totp/?secret=JBSWY3DPEHPK3PXP"); err == nil {
+		t.Error("expected error for fully empty label")
+	}
+}
+
 func TestParseRejectsOutOfRangeParams(t *testing.T) {
 	cases := []string{
 		"otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&digits=3",
