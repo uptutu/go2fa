@@ -67,6 +67,39 @@ func main() {
 
 // openVault returns an opened, unlocked vault. Handles init-on-first-run.
 func openVault(ctx context.Context) (*vault.Vault, error) {
+	v, err := openOrInitVault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if v.IsUnlocked() {
+		return v, nil
+	}
+	m, err := v.LoadMeta(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if m.Mode == vault.ModePassword {
+		for attempts := 0; attempts < 3; attempts++ {
+			pw := promptPassword("Master password: ")
+			if err := v.UnlockWithPassword(ctx, pw); err == nil {
+				return v, nil
+			}
+			fmt.Fprintln(os.Stderr, "wrong password")
+		}
+		return nil, errors.New("too many wrong attempts")
+	}
+	if err := v.UnlockMachineKey(ctx); err != nil {
+		return nil, fmt.Errorf("unlock machine key: %w", err)
+	}
+	return v, nil
+}
+
+// openOrInitVault opens the vault file, creating and initialising it
+// on first run. It does NOT unlock the vault — callers that need an
+// unlocked vault must do so themselves (openVault for the terminal
+// path; the GUI's SPA does it via /api/unlock so the launching
+// terminal never has to prompt).
+func openOrInitVault(ctx context.Context) (*vault.Vault, error) {
 	exists, err := vault.Exists()
 	if err != nil {
 		return nil, err
@@ -92,26 +125,6 @@ func openVault(ctx context.Context) (*vault.Vault, error) {
 			return nil, err
 		}
 		return v, nil
-	}
-	if v.IsUnlocked() {
-		return v, nil
-	}
-	m, err := v.LoadMeta(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if m.Mode == vault.ModePassword {
-		for attempts := 0; attempts < 3; attempts++ {
-			pw := promptPassword("Master password: ")
-			if err := v.UnlockWithPassword(ctx, pw); err == nil {
-				return v, nil
-			}
-			fmt.Fprintln(os.Stderr, "wrong password")
-		}
-		return nil, errors.New("too many wrong attempts")
-	}
-	if err := v.UnlockMachineKey(ctx); err != nil {
-		return nil, fmt.Errorf("unlock machine key: %w", err)
 	}
 	return v, nil
 }

@@ -38,11 +38,17 @@ var cmdGUI = &cobra.Command{
 	Use:   "gui",
 	Short: "Launch the desktop GUI (native window)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		v, err := openVault(context.Background())
+		v, err := openOrInitVault(context.Background())
 		if err != nil {
 			return err
 		}
 		defer v.Close()
+		// Deliberately do NOT unlock here. When launched from a desktop
+		// shortcut the launching terminal is detached — prompting there
+		// would silently drop the input. Leave the vault locked; the
+		// SPA's #unlock scrim calls /api/unlock to derive the KEK from
+		// whatever the user types in the window. No-password vaults
+		// hit the server's UnlockMachineKey branch through the same path.
 		return guiRunner(v)
 	},
 }
