@@ -440,23 +440,59 @@ async function createGroup() {
 const secretsUl = $('#secrets');
 const emptyEl = $('#empty');
 
-function renderSecrets() {
-  const list = visibleSecrets();
-  const trulyEmpty = state.secrets.length === 0; // no data at all → onboarding; filtered-empty keeps the existing copy
-  emptyEl.hidden = !trulyEmpty;
-  secretsUl.hidden = list.length === 0;
-  secretsUl.innerHTML = '';
-  const RING_LEN = 2 * Math.PI * 16;
-  for (const s of list) {
-    const li = document.createElement('li');
-    li.className = 'secret';
-    if (s.remaining <= 0) li.classList.add('expired');
-    else if (s.remaining <= 5) li.classList.add('expiring');
+const RING_LEN = 2 * Math.PI * 16;
+
+function codeFmt(s) {
+  const digits = String(s.digits || 6);
+  return digits === s.code.length ? s.code : (s.code + ' '.repeat(digits)).slice(0, digits);
+}
+
+// Patch only the countdown visuals of an existing row — no rebuild, so
+// hover / focus / selection on the row are never interrupted.
+function updateRowCountdown(li, s) {
+  li.classList.toggle('expired', s.remaining <= 0);
+  li.classList.toggle('expiring', s.remaining > 0 && s.remaining <= 5);
+  const num = $('.num', li);
+  if (num && num.textContent !== String(s.remaining)) num.textContent = String(s.remaining);
+  const prog = $('.progress', li);
+  if (prog) {
+    prog.setAttribute('stroke-dashoffset',
+      (RING_LEN * (1 - Math.max(0, s.remaining) / s.period)).toFixed(2));
+  }
+}
+
+function updateRow(li, s) {
+  const codeBtn = $('.code', li);
+  const fmt = codeFmt(s);
+  if (!codeBtn.classList.contains('copied') && codeBtn.textContent !== fmt) {
+    codeBtn.textContent = fmt;
+  }
+  const aria = t('code_aria', { digits: String(s.digits || 6), issuer: s.issuer });
+  if (codeBtn.getAttribute('aria-label') !== aria) codeBtn.setAttribute('aria-label', aria);
+  const groupTag = s.group_id > 0 && s.group_name
+    ? `<span class="tag">${escapeHtml(s.group_name)}</span>` : '';
+  const issuerHtml = `${escapeHtml(s.issuer || t('no_issuer'))}${groupTag}`;
+  const issuerEl = $('.issuer', li);
+  if (issuerEl.innerHTML !== issuerHtml) issuerEl.innerHTML = issuerHtml;
+  const accountHtml = `${escapeHtml(s.account || '')}${s.notes ? ' · ' + escapeHtml(s.notes) : ''}`;
+  const accountEl = $('.account', li);
+  if (accountEl.innerHTML !== accountHtml) accountEl.innerHTML = accountHtml;
+  const cb = $('.pick-cb', li);
+  const on = state.selected.has(s.id);
+  if (cb.checked !== on) cb.checked = on;
+  updateRowCountdown(li, s);
+}
+
+function createRow(s) {
+  const li = document.createElement('li');
+  li.className = 'secret';
+  li.dataset.id = s.id;
+  if (s.remaining <= 0) li.classList.add('expired');
+  else if (s.remaining <= 5) li.classList.add('expiring');
 
     const groupTag = s.group_id > 0 && s.group_name
       ? `<span class="tag">${escapeHtml(s.group_name)}</span>` : '';
-    const digits = String(s.digits || 6);
-    const codeFmt = digits === s.code.length ? s.code : (s.code + ' '.repeat(digits)).slice(0, digits);
+    const fmt = codeFmt(s);
     const checked = state.selected.has(s.id) ? 'checked' : '';
 
     li.innerHTML = `
@@ -468,16 +504,16 @@ function renderSecrets() {
           <circle class="track" cx="20" cy="20" r="16"/>
           <circle class="progress" cx="20" cy="20" r="16"
                   stroke-dasharray="${RING_LEN.toFixed(2)}"
-                  stroke-dashoffset="${(RING_LEN * (1 - s.remaining / s.period)).toFixed(2)}"/>
+                  stroke-dashoffset="${(RING_LEN * (1 - Math.max(0, s.remaining) / s.period)).toFixed(2)}"/>
         </svg>
-        <span class="num">${s.remaining}</span>
+        <span class="num">${Math.max(0, s.remaining)}</span>
       </div>
       <div class="who">
         <div class="issuer">${escapeHtml(s.issuer || t('no_issuer'))}${groupTag}</div>
         <div class="account">${escapeHtml(s.account || '')}${s.notes ? ' · ' + escapeHtml(s.notes) : ''}</div>
       </div>
       <div class="code-wrap">
-        <button class="code" type="button" title="${escapeHtml(t('copy_title_attr'))}" aria-label="${escapeHtml(t('code_aria', { digits, issuer: s.issuer }))}">${escapeHtml(codeFmt)}</button>
+        <button class="code" type="button" title="${escapeHtml(t('copy_title_attr'))}" aria-label="${escapeHtml(t('code_aria', { digits: String(s.digits || 6), issuer: s.issuer }))}">${escapeHtml(fmt)}</button>
       </div>
       <div class="row-actions">
         <button class="icon-btn qr-btn" type="button" data-id="${escapeHtml(s.id)}" aria-label="${escapeHtml(t('qr_aria', { issuer: s.issuer }))}" title="${escapeHtml(t('qr_title'))}">
@@ -496,7 +532,29 @@ function renderSecrets() {
       if (on) state.selected.add(s.id); else state.selected.delete(s.id);
       updateSelectionUI();
     };
-    secretsUl.appendChild(li);
+  updateRowCountdown(li, s);
+  secretsUl.appendChild(li);
+  return li;
+}
+
+// Diff-render: reuse existing rows by id, create/remove only what changed.
+// Rebuilding the list every second (the old behavior) destroyed the node
+// under the cursor each tick, which is what broke hover/click mid-refresh.
+function renderSecrets() {
+  const list = visibleSecrets();
+  const trulyEmpty = state.secrets.length === 0; // no data at all → onboarding; filtered-empty keeps the existing copy
+  emptyEl.hidden = !trulyEmpty;
+  secretsUl.hidden = list.length === 0;
+
+  const wanted = new Set(list.map((s) => s.id));
+  for (const li of $$('li.secret', secretsUl)) {
+    if (!wanted.has(li.dataset.id)) li.remove();
+  }
+  const byId = new Map($$('li.secret', secretsUl).map((li) => [li.dataset.id, li]));
+  for (const s of list) {
+    const existing = byId.get(s.id);
+    if (existing) updateRow(existing, s);
+    else createRow(s);
   }
   updateSelectionUI();
 }
@@ -920,7 +978,33 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   refreshAll();
-  setInterval(refreshSecrets, 1000);
+
+  /* -------- Countdown --------
+   * The server sends each code with its `remaining` seconds. Ticking the
+   * countdown locally patches only the number + ring of existing rows —
+   * no DOM rebuild — so hover / focus / selection are never interrupted.
+   * We only re-fetch when a code rotates (remaining hits 0) or on a slow
+   * background resync; renderSecrets() is diff-based, so even those
+   * refreshes update rows in place.
+   */
+  const tickCountdown = () => {
+    let rotated = false;
+    for (const s of state.secrets) {
+      s.remaining -= 1;
+      if (s.remaining <= 0) rotated = true;
+    }
+    for (const li of $$('li.secret', secretsUl)) {
+      const s = state.secrets.find((x) => x.id === li.dataset.id);
+      if (s) updateRowCountdown(li, s);
+    }
+    if (rotated) refreshSecrets();
+  };
+  const scheduleTick = () => {
+    // Align to the wall clock so we stay in step with the server's period.
+    setTimeout(() => { tickCountdown(); scheduleTick(); }, 1000 - (Date.now() % 1000) + 15);
+  };
+  scheduleTick();
+  setInterval(refreshSecrets, 60000); // background resync (diff-rendered, hover-safe)
   setInterval(loadStatus, 30000);
 
   /* -------- Liquid glass pointer sheen --------
