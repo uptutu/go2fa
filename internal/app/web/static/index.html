@@ -528,6 +528,12 @@
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
+    /* Hoist each row into its own compositor layer so the continuously
+       animated background blobs (`.b1/.b2/.b3`, blur 90, infinite drift)
+       don't force a per-frame backdrop-filter resample of the whole list —
+       that was the cause of hover dying every tick. */
+    transform: translateZ(0);
+    will-change: transform;
     background: var(--glass);
     backdrop-filter: var(--blur);
     -webkit-backdrop-filter: var(--blur);
@@ -537,7 +543,10 @@
     transition: transform .25s cubic-bezier(.2,.8,.2,1), border-color .2s, background .2s, box-shadow .25s;
   }
   .secret:hover {
-    transform: translateY(-2px);
+    /* Keep the translateZ(0) layer promotion; without it the row drops its
+       compositor layer for the duration of the hover and starts paying the
+       per-frame backdrop-filter cost again — visible as hover stutter. */
+    transform: translateZ(0) translateY(-2px);
     border-color: var(--border-strong);
     background: var(--glass-2);
     box-shadow: var(--topline), 0 14px 28px -10px rgba(0,0,0,0.45), 0 4px 14px -8px rgba(124,247,177,0.18);
