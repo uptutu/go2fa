@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS kv_meta (
 
 const currentSchemaVersion = 1
 
+// ErrLocked is returned by every operation that needs the KEK while the
+// vault is locked. Callers match with errors.Is.
+var ErrLocked = errors.New("vault: locked")
+
 // Store wraps the *sql.DB with row-level encryption helpers. It holds the
 // KEK in memory while the vault is unlocked; Lock() must zero it.
 type Store struct {
@@ -67,10 +71,13 @@ type Store struct {
 // OpenStore opens (or creates) the SQLite database at path and runs
 // migrations. Pass kek=nil to leave the store locked (for inspection).
 func OpenStore(ctx context.Context, path string, kek []byte) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("vault: open %s: %w", path, err)
 	}
+	// SQLite allows one writer; a single connection avoids SQLITE_BUSY on
+	// concurrent web writes. WAL still gives us read-while-write.
+	db.SetMaxOpenConns(1)
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -136,7 +143,7 @@ func (s *Store) SaveMeta(ctx context.Context, m Meta) error {
 // VerifyKEK checks the stored verifier against the in-memory KEK.
 func (s *Store) VerifyKEK(ctx context.Context) error {
 	if !s.IsUnlocked() {
-		return errors.New("vault: locked")
+		return ErrLocked
 	}
 	m, err := s.LoadMeta(ctx)
 	if err != nil {
@@ -218,7 +225,7 @@ func (s *Store) DeleteGroup(ctx context.Context, id int64) error {
 // ListSecrets returns all secrets with their sensitive fields decrypted.
 func (s *Store) ListSecrets(ctx context.Context) ([]Secret, error) {
 	if !s.IsUnlocked() {
-		return nil, errors.New("vault: locked")
+		return nil, ErrLocked
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, group_id, issuer, account, secret_enc, secret_nonce, algorithm,
@@ -272,7 +279,7 @@ func (s *Store) ListSecrets(ctx context.Context) ([]Secret, error) {
 // GetSecret fetches a single secret by UUID, decrypted.
 func (s *Store) GetSecret(ctx context.Context, id uuid.UUID) (Secret, error) {
 	if !s.IsUnlocked() {
-		return Secret{}, errors.New("vault: locked")
+		return Secret{}, ErrLocked
 	}
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, group_id, issuer, account, secret_enc, secret_nonce, algorithm,
@@ -316,7 +323,7 @@ func (s *Store) GetSecret(ctx context.Context, id uuid.UUID) (Secret, error) {
 // UpsertSecret inserts or updates a secret. Sensitive fields are encrypted.
 func (s *Store) UpsertSecret(ctx context.Context, in Secret) error {
 	if !s.IsUnlocked() {
-		return errors.New("vault: locked")
+		return ErrLocked
 	}
 	if in.ID == uuid.Nil {
 		in.ID = uuid.New()

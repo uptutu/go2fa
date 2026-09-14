@@ -1,9 +1,10 @@
 // Package vault provides the encrypted SQLite-backed TOTP vault.
 //
 // Layered as:
-//   model.go    — domain types (Group, Secret, plain/in-memory only)
-//   store.go    — SQLite I/O + row-level encryption wrappers
-//   vault.go    — Open/Unlock/Lock, KEK derivation, in-memory cache, migrations
+//
+//	model.go    — domain types (Group, Secret, plain/in-memory only)
+//	store.go    — SQLite I/O + row-level encryption wrappers
+//	vault.go    — Open/Unlock/Lock, KEK derivation, in-memory cache, migrations
 package vault
 
 import (
@@ -30,7 +31,7 @@ const (
 type Group struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
-	Color     string    `json:"color"`     // hex like "#7c3aed"; empty means default
+	Color     string    `json:"color"` // hex like "#7c3aed"; empty means default
 	SortOrder int       `json:"sort_order"`
 	CreatedAt time.Time `json:"created_at"`
 }

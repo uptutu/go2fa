@@ -69,6 +69,14 @@ func Parse(s string) (URI, error) {
 	}
 	digits := parseIntDefault(q.Get("digits"), 6)
 	period := parseIntDefault(q.Get("period"), 30)
+	// Same bounds the vault enforces on add/edit — reject junk URIs here
+	// instead of failing later at code-generation time.
+	if digits < 4 || digits > 10 {
+		return URI{}, fmt.Errorf("otpauth: digits out of range: %d", digits)
+	}
+	if period < 5 || period > 120 {
+		return URI{}, fmt.Errorf("otpauth: period out of range: %d", period)
+	}
 	if qi := q.Get("issuer"); qi != "" {
 		issuer = qi
 	}

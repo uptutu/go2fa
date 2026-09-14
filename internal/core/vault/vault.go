@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -186,7 +188,7 @@ func (v *Vault) UnlockMachineKey(ctx context.Context) error {
 // typically small (<1000). Caller should export first if concerned.
 func (v *Vault) SetPassword(ctx context.Context, newPassword string) error {
 	if !v.IsUnlocked() {
-		return errors.New("vault: locked")
+		return ErrLocked
 	}
 	if newPassword == "" {
 		return errors.New("vault: password cannot be empty")
@@ -201,14 +203,48 @@ func (v *Vault) SetPassword(ctx context.Context, newPassword string) error {
 // WARNING: weakens the vault to machine-bound only.
 func (v *Vault) DisablePassword(ctx context.Context) error {
 	if !v.IsUnlocked() {
-		return errors.New("vault: locked")
+		return ErrLocked
 	}
 	return v.reInitWith(ctx, ModeNoPassword, "")
 }
 
 // reInitWith wipes and rebuilds the vault under a fresh KEK (different
 // mode). Used by SetPassword and DisablePassword.
-func (v *Vault) reInitWith(ctx context.Context, mode VaultMode, password string) error {
+//
+// Data-loss guard: the sequence DELETE → Init → re-insert is NOT atomic.
+// We checkpoint the WAL, copy the database file aside, and restore it on
+// any failure, so a crash mid-rekey leaves the old vault intact.
+func (v *Vault) reInitWith(ctx context.Context, mode VaultMode, password string) (err error) {
+	path := filepath.Join(v.dir, "vault.sqlite")
+	if _, err := v.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return err
+	}
+	bak := path + ".bak"
+	if err := copyFile(path, bak); err != nil {
+		return fmt.Errorf("vault: backup before rekey: %w", err)
+	}
+	oldKek := append([]byte(nil), v.kek...) // keep so a restore stays unlocked
+	ok := false
+	defer func() {
+		if ok {
+			_ = os.Remove(bak)
+			return
+		}
+		log.Printf("vault: rekey failed (%v); restoring %s", err, bak)
+		_ = v.db.Close()
+		_ = os.Remove(path + "-wal")
+		_ = os.Remove(path + "-shm")
+		if rerr := copyFile(bak, path); rerr != nil {
+			log.Printf("vault: RESTORE FAILED: %v — manual recovery from %s", rerr, bak)
+			return // keep bak on disk for manual recovery
+		}
+		_ = os.Remove(bak)
+		if st, oerr := OpenStore(ctx, path, nil); oerr == nil {
+			v.Store = st
+			v.Store.kek = oldKek
+		}
+	}()
+
 	secrets, err := v.ListSecrets(ctx)
 	if err != nil {
 		return err
@@ -231,15 +267,16 @@ func (v *Vault) reInitWith(ctx context.Context, mode VaultMode, password string)
 	}
 	idMap := make(map[int64]int64, len(groups))
 	for _, g := range groups {
+		oldID := g.ID
 		g.ID = 0
 		newID, err := v.CreateGroup(ctx, g)
 		if err != nil {
 			return err
 		}
-		idMap[g.ID] = newID
+		idMap[oldID] = newID
 	}
 	for i := range secrets {
-		if newID, ok := idMap[secrets[i].GroupID]; ok {
+		if newID, hit := idMap[secrets[i].GroupID]; hit {
 			secrets[i].GroupID = newID
 		}
 	}
@@ -248,7 +285,25 @@ func (v *Vault) reInitWith(ctx context.Context, mode VaultMode, password string)
 			return err
 		}
 	}
+	ok = true
 	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // NewForTesting wraps an existing Store with a Vault (used by tests in

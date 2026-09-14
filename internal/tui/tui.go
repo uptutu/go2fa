@@ -31,8 +31,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -42,6 +40,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/uptutu/go2fa/internal/core/clipboard"
 	"github.com/uptutu/go2fa/internal/core/otpauth"
 	"github.com/uptutu/go2fa/internal/core/totp"
 	"github.com/uptutu/go2fa/internal/core/vault"
@@ -662,7 +661,7 @@ func (m *Model) copyCmd(s vault.Secret) tea.Cmd {
 			return struct{}{}
 		}
 		m.promoted[s.ID.String()] = time.Now()
-		clipboardWrite(code)
+		clipboard.Write(code)
 		_ = m.v.TouchLastUsed(m.ctx, s.ID)
 		return tickMsg(time.Now())
 	}
@@ -1002,10 +1001,10 @@ func stripCtl(s string) string {
 	b.Grow(len(s))
 	const (
 		sNorm = iota
-		sEsc   // saw ESC, waiting for introducer
-		sCSI   // inside CSI: skip until final byte (0x40..0x7E)
-		sOSC   // inside OSC: skip until BEL or ST (ESC \)
-		sOST   // inside OSC, just saw ESC; next char is '\' = ST end
+		sEsc  // saw ESC, waiting for introducer
+		sCSI  // inside CSI: skip until final byte (0x40..0x7E)
+		sOSC  // inside OSC: skip until BEL or ST (ESC \)
+		sOST  // inside OSC, just saw ESC; next char is '\' = ST end
 	)
 	state := sNorm
 	for _, r := range s {
@@ -1089,36 +1088,6 @@ func renderProgress(remaining, period int) string {
 		filled = width
 	}
 	return strings.Repeat("▓", filled) + strings.Repeat("░", width-filled)
-}
-
-// clipboardWrite shells out to the platform clipboard tool.
-func clipboardWrite(s string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "windows":
-		cmd = exec.Command("clip")
-	default:
-		for _, bin := range []string{"wl-copy", "xclip", "xsel"} {
-			if _, err := exec.LookPath(bin); err == nil {
-				switch bin {
-				case "wl-copy":
-					cmd = exec.Command("wl-copy")
-				case "xclip":
-					cmd = exec.Command("xclip", "-selection", "clipboard")
-				default:
-					cmd = exec.Command("xsel", "--clipboard", "--input")
-				}
-				break
-			}
-		}
-	}
-	if cmd == nil {
-		return
-	}
-	cmd.Stdin = strings.NewReader(s)
-	_ = cmd.Run()
 }
 
 // quiet unused import linter if otpauth is removed later.

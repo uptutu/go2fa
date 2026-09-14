@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -13,19 +14,19 @@ var Magic = [4]byte{'2', 'F', 'A', 0x01}
 
 // Container layout (binary, big-endian except where noted):
 //
-//   [4]  Magic           "2FA\x01"
-//   [1]  Version         1
-//   [1]  KDF ID          1 = Argon2id
-//   [4]  Argon2 time     uint32
-//   [4]  Argon2 memory   uint32 (MiB)
-//   [1]  Argon2 threads  uint8
-//   [16] KDF salt        (Argon2id salt)
-//   [16] MAC salt        (separate salt for HMAC key)
-//   [12] Nonce           (GCM nonce)
-//   [4]  Ciphertext len  uint32
-//   [N]  Ciphertext      (GCM seal of plaintext)
-//   [4]  CRC32 of all preceding bytes (little-endian)
-//   [32] SHA-256 keyed MAC of all preceding bytes (tamper check)
+//	[4]  Magic           "2FA\x01"
+//	[1]  Version         1
+//	[1]  KDF ID          1 = Argon2id
+//	[4]  Argon2 time     uint32
+//	[4]  Argon2 memory   uint32 (MiB)
+//	[1]  Argon2 threads  uint8
+//	[16] KDF salt        (Argon2id salt)
+//	[16] MAC salt        (separate salt for HMAC key)
+//	[12] Nonce           (GCM nonce)
+//	[4]  Ciphertext len  uint32
+//	[N]  Ciphertext      (GCM seal of plaintext)
+//	[4]  CRC32 of all preceding bytes (little-endian)
+//	[32] SHA-256 keyed MAC of all preceding bytes (tamper check)
 //
 // AAD for GCM = header bytes from Magic up to (but not including) Nonce.
 const (
@@ -126,8 +127,11 @@ func OpenExport(password string, buf []byte) ([]byte, error) {
 		return nil, err
 	}
 	macKey := DeriveKey(password+"\x00mac", h.MACSalt)
-	want := macOf(macKey, buf[:len(buf)-32])
-	if !ConstEq(want, buf[len(buf)-32:]) {
+	body := buf[:len(buf)-32]
+	// v1 files used SHA-256(key‖msg); we write HMAC now but still accept the
+	// legacy MAC so old exports keep opening.
+	if !ConstEq(macOf(macKey, body), buf[len(buf)-32:]) &&
+		!ConstEq(legacyMacOf(macKey, body), buf[len(buf)-32:]) {
 		return nil, errors.New("crypto/format: HMAC mismatch (wrong password or tampered)")
 	}
 	key := DeriveKey(password, h.KDFSalt)
@@ -138,10 +142,16 @@ func OpenExport(password string, buf []byte) ([]byte, error) {
 	return Open(key, full, aad)
 }
 
-// macOf = SHA-256(key || msg). 32-byte output. Simple "keyed hash"; not
-// FIPS HMAC but adequate for tamper detection (any attacker without the
-// password-derived macKey cannot forge a valid MAC).
+// macOf = HMAC-SHA-256. Writers use this from v1 onward.
 func macOf(key, msg []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(msg)
+	return h.Sum(nil)
+}
+
+// legacyMacOf = SHA-256(key‖msg), the original v1 construction. Kept only
+// to open existing exports.
+func legacyMacOf(key, msg []byte) []byte {
 	h := sha256.New()
 	h.Write(key)
 	h.Write(msg)

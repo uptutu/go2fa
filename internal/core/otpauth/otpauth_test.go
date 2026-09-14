@@ -70,7 +70,7 @@ func TestParseBadScheme(t *testing.T) {
 func TestStringRoundtrip(t *testing.T) {
 	in := URI{
 		Type: TOTP, Issuer: "Acme Co",
-		Secret: []byte("JBSWY3DPEHPK3PXP"),
+		Secret:    []byte("JBSWY3DPEHPK3PXP"),
 		Algorithm: totp.SHA1, Digits: 6, Period: 30,
 		Account: "alice",
 	}
@@ -84,5 +84,18 @@ func TestStringRoundtrip(t *testing.T) {
 	}
 	if out.Issuer != in.Issuer || out.Account != in.Account {
 		t.Errorf("roundtrip mismatch: %+v", out)
+	}
+}
+func TestParseRejectsOutOfRangeParams(t *testing.T) {
+	cases := []string{
+		"otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&digits=3",
+		"otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&digits=11",
+		"otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&period=4",
+		"otpauth://totp/GitHub:alice?secret=JBSWY3DPEHPK3PXP&period=121",
+	}
+	for _, c := range cases {
+		if _, err := Parse(c); err == nil {
+			t.Errorf("expected rejection for %q", c)
+		}
 	}
 }

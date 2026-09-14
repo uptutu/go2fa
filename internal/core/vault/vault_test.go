@@ -170,3 +170,46 @@ func TestSetPasswordReencrypts(t *testing.T) {
 		t.Errorf("data lost after re-encryption: %+v", all)
 	}
 }
+
+// TestSetPasswordPreservesGroups: rekeying recreates groups and keeps each
+// secret in its original group (regression: the id map once keyed on the
+// zeroed ID, collapsing every group into the last one created).
+func TestSetPasswordPreservesGroups(t *testing.T) {
+	v := newTestVault(t, ModeNoPassword, "")
+	ctx := context.Background()
+	g1, err := v.CreateGroup(ctx, Group{Name: "Work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g2, err := v.CreateGroup(ctx, Group{Name: "Home"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.UpsertSecret(ctx, Secret{Issuer: "A", GroupID: g1, SecretRaw: []byte("AAAA"), Algorithm: totp.SHA1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.UpsertSecret(ctx, Secret{Issuer: "B", GroupID: g2, SecretRaw: []byte("BBBB"), Algorithm: totp.SHA1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.SetPassword(ctx, "newpass"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := v.ListSecrets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, _ := v.ListGroups(ctx)
+	gname := map[int64]string{}
+	for _, g := range groups {
+		gname[g.ID] = g.Name
+	}
+	if len(all) != 2 {
+		t.Fatalf("want 2 secrets, got %d", len(all))
+	}
+	for _, s := range all {
+		want := map[string]string{"A": "Work", "B": "Home"}[s.Issuer]
+		if got := gname[s.GroupID]; got != want {
+			t.Errorf("%s: group %q, want %q", s.Issuer, got, want)
+		}
+	}
+}
