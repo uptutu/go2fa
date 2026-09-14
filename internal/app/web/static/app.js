@@ -577,24 +577,35 @@ function updateSelectionUI() {
 }
 
 async function copyCode(id, btn) {
-  // Look up the secret fresh on each click — the row's onclick closure
-  // was bound once at render time and would copy a stale code after the
-  // TOTP rotates (the visible button text updates per tick via updateRow,
-  // but the click handler kept capturing the original `s` object).
-  const s = state.secrets.find((x) => x.id === id);
-  if (!s) return;
+  // Copy the code that's CURRENTLY on the button, not whatever
+  // `state.secrets` happens to hold. Two race windows made that stale:
+  //   1. The button's onclick closure was bound once at row creation
+  //      and held the original `s` object forever (closure-stale).
+  //   2. Even after the v0.3.5 fix (fresh `state.secrets.find` lookup),
+  //      `state.secrets` lags by up to one TOTP rotation while
+  //      `refreshSecrets()` is in flight after `tickCountdown` detects
+  //      a rotation — clicking during that window copies the *previous*
+  //      round's code.
+  // The button text is updated by `updateRow` on every tick + refresh,
+  // so `.textContent` is always the latest displayed code.
+  const code = btn.textContent.trim();
+  if (!code || code === t('copied')) return;
   try {
-    await navigator.clipboard.writeText(s.code);
+    await navigator.clipboard.writeText(code);
+    const previous = code;
     btn.classList.add('copied');
     btn.textContent = t('copied');
     // server-side touch (last_used) — fire and forget
-    try { await api(`/api/code?id=${encodeURIComponent(s.id)}`); } catch (_) { /* ignore */ }
+    try { await api(`/api/code?id=${encodeURIComponent(id)}`); } catch (_) { /* ignore */ }
     toast(t('toast_copied'), 'good');
     setTimeout(() => {
+      // Only clear the "Copied!" label. Let `updateRow` keep driving
+      // the displayed code on the next tick — it always reads from
+      // the fresh `state.secrets`, so we never restore a stale value.
       btn.classList.remove('copied');
-      const digits = String(s.digits || 6);
-      const codeFmt = digits === s.code.length ? s.code : (s.code + ' '.repeat(digits)).slice(0, digits);
-      btn.textContent = codeFmt;
+      const fresh = state.secrets.find((x) => x.id === id);
+      if (fresh) btn.textContent = codeFmt(fresh);
+      else btn.textContent = previous; // fallback if the row was removed
     }, 900);
   } catch (e) {
     toast(t('toast_copy_failed', { err: e.message }), 'bad');
