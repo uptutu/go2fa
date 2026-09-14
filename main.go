@@ -59,6 +59,7 @@ func main() {
 
 	root.AddCommand(cmdInit, cmdUnlock, cmdList, cmdAdd, cmdCopy,
 		cmdDelete, cmdEdit, cmdGroup, cmdExport, cmdImport, cmdTUI, cmdWeb, cmdGUI)
+	cmdGUI.AddCommand(cmdGUIInstall)
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

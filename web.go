@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/uptutu/go2fa/internal/app/gui/install"
 	webapp "github.com/uptutu/go2fa/internal/app/web"
 	"github.com/uptutu/go2fa/internal/core/vault"
 )
@@ -43,6 +44,62 @@ var cmdGUI = &cobra.Command{
 		defer v.Close()
 		return guiRunner(v)
 	},
+}
+
+var cmdGUIInstall = &cobra.Command{
+	Use:   "install",
+	Short: "Install a desktop shortcut for the go2fa GUI on this OS",
+	Long: "Detects the current OS and writes a launcher shortcut (Linux: .desktop, " +
+		"macOS: .app bundle, Windows: .lnk) that invokes `2fa gui`. " +
+		"If --password is given, the vault is initialised in password mode " +
+		"with that password and the shortcut embeds --password so future " +
+		"launches unlock immediately.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pw, _ := cmd.Flags().GetString("password")
+		extra := []string(nil)
+		ctx := context.Background()
+
+		// Init the vault if missing. The vault is created here, not inside
+		// Install(), because the install call must be idempotent: re-running
+		// `gui install --password ...` should refresh the shortcut, not
+		// re-init the vault.
+		exists, err := vault.Exists()
+		if err != nil {
+			return err
+		}
+		if !exists && pw != "" {
+			v, err := vault.Open(ctx)
+			if err != nil {
+				return err
+			}
+			if err := v.Init(ctx, vault.ModePassword, pw); err != nil {
+				_ = v.Close()
+				return fmt.Errorf("init vault: %w", err)
+			}
+			if err := v.Close(); err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, "vault initialised in password mode")
+		}
+
+		if pw != "" {
+			extra = []string{"--password=" + pw}
+		}
+
+		res, err := install.Install(extra)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "installed shortcut:", res.ShortcutPath)
+		if res.IconPath != "" {
+			fmt.Fprintln(os.Stderr, "icon:               ", res.IconPath)
+		}
+		return nil
+	},
+}
+
+func init() {
+	cmdGUIInstall.Flags().String("password", "", "initialise vault with this master password and embed in shortcut")
 }
 
 // launchWeb starts the HTTP server, points the browser at it, and blocks
