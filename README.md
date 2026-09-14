@@ -56,6 +56,11 @@ $ 2fa import backup.json
   - `127.0.0.1` listen: no auth required (loopback-only).
   - Non-loopback (`--listen 0.0.0.0:8080`): requires an `X-Auth-Token`
     header (random token printed to stderr at startup).
+  - `--token` also works on a loopback bind if you want a token gate on a
+    multi-user machine (otherwise any local user can read your codes).
+  - Idle auto-lock: after 15 minutes without API activity the vault locks
+    itself; the web UI shows an unlock prompt (`POST /api/unlock`).
+  - Copied codes are auto-cleared from the clipboard after 45 seconds.
   - `--no-password` vault + `X-No-Password: true` header: bypass for
     local dev only.
 

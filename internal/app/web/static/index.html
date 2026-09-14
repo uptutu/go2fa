@@ -1594,6 +1594,24 @@
   </div>
 </div>
 
+<div id="unlock" class="scrim" role="dialog" aria-modal="true" aria-labelledby="unlock-title" hidden>
+  <div class="dialog" style="width:min(440px, calc(100vw - 32px))">
+    <header><h2 id="unlock-title" data-i18n="unlock_title">Vault locked</h2></header>
+    <div class="body">
+      <p data-i18n="unlock_body" style="margin:0;color:var(--text-dim)">The vault was locked after a period of inactivity. Enter your master password to unlock it.</p>
+      <div class="field" id="unlock-field" style="margin-top:12px">
+        <label for="unlock-pass" data-i18n="unlock_password_label">Master password</label>
+        <input id="unlock-pass" type="password" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="unlock-err" class="err" role="alert" aria-live="polite"></div>
+    </div>
+    <footer>
+      <button class="btn ghost" type="button" data-unlock="no" data-i18n="cancel">Cancel</button>
+      <button class="btn primary" type="button" data-unlock="yes" data-i18n="unlock_submit">Unlock</button>
+    </footer>
+  </div>
+</div>
+
 <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
 <!-- QR dialog (show otpauth:// URI as a QR for phone scanning) -->

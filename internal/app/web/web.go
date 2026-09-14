@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,17 +30,23 @@ import (
 
 // Server wraps the HTTP API.
 type Server struct {
-	v        *vault.Vault
-	mux      *http.ServeMux
-	addr     string
-	srv      *http.Server
-	listener net.Listener
-	token    string // required for non-loopback binds
+	v            *vault.Vault
+	mux          *http.ServeMux
+	addr         string
+	srv          *http.Server
+	listener     net.Listener
+	token        string       // required for non-loopback binds
+	lastActivity atomic.Int64 // unix seconds of the last gated request
 }
+
+// idleLockAfter locks the vault when the API has seen no request for this
+// long. The KEK otherwise lives in memory for the whole web/gui session.
+const idleLockAfter = 15 * time.Minute
 
 // New constructs a server bound to addr.
 func New(addr string, v *vault.Vault, token string) (*Server, error) {
 	s := &Server{v: v, addr: addr, token: token, mux: http.NewServeMux()}
+	s.lastActivity.Store(time.Now().Unix())
 	s.routes()
 	return s, nil
 }
@@ -52,6 +59,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	}
 	s.listener = ln
 	s.srv = &http.Server{Handler: s.mux, ReadHeaderTimeout: 5 * time.Second}
+	go s.idleLockLoop()
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("web: %v", err)
@@ -91,6 +99,7 @@ func (s *Server) Loopback() bool {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/api/status", s.handleStatus)
+	s.mux.HandleFunc("/api/unlock", s.handleUnlock)
 	s.mux.HandleFunc("/api/groups", s.handleGroups)
 	s.mux.HandleFunc("/api/groups/", s.handleGroupItem)
 	s.mux.HandleFunc("/api/secrets", s.handleSecrets)
@@ -98,6 +107,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/code", s.handleCode)
 	s.mux.HandleFunc("/api/parse-otpauth", s.handleParseOtpauth)
 	s.mux.HandleFunc("/api/export", s.handleExport)
+	s.mux.HandleFunc("/api/mode", s.handleMode)
 	s.mux.Handle("/", http.FileServer(http.FS(staticFS)))
 }
 
@@ -147,6 +157,7 @@ func (s *Server) originOK(r *http.Request) bool {
 // CSRF/origin. Returns true if the request may proceed; otherwise writes
 // the appropriate error response and returns false.
 func (s *Server) gate(r *http.Request, w http.ResponseWriter) bool {
+	s.lastActivity.Store(time.Now().Unix())
 	if !s.authOK(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
@@ -156,6 +167,19 @@ func (s *Server) gate(r *http.Request, w http.ResponseWriter) bool {
 		return false
 	}
 	return true
+}
+
+// idleLockLoop locks the vault after idleLockAfter of API silence.
+func (s *Server) idleLockLoop() {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for range t.C {
+		if s.v.IsUnlocked() &&
+			time.Since(time.Unix(s.lastActivity.Load(), 0)) > idleLockAfter {
+			log.Printf("web: idle for %s — locking vault", idleLockAfter)
+			s.v.Lock()
+		}
+	}
 }
 
 // writeForbidden short-circuits a CSRF / origin mismatch.
@@ -176,7 +200,13 @@ func (s *Server) writeErr(w http.ResponseWriter, code int, msg string) {
 // internalErr logs the underlying error and returns a generic 500 to the
 // caller. Use this for server-side failures (decryption, DB, crypto) so
 // internal state and file paths do not leak through HTTP responses.
+// A locked vault is not an internal error: 423 lets the frontend show the
+// unlock prompt instead of a generic failure.
 func (s *Server) internalErr(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, vault.ErrLocked) {
+		http.Error(w, "vault locked", http.StatusLocked)
+		return
+	}
 	log.Printf("web: %s %s: %v", r.Method, r.URL.Path, err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
@@ -226,6 +256,47 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		out["mode"] = "no-password"
 	}
 	s.writeJSON(w, out)
+}
+
+// handleUnlock unlocks a locked vault (idle auto-lock, or `2fa lock`).
+// Password mode needs the master password; no-password mode re-derives
+// the machine key.
+func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	if !s.gate(r, w) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.v.IsUnlocked() {
+		s.writeJSON(w, map[string]bool{"ok": true})
+		return
+	}
+	var in struct {
+		Password string `json:"password"`
+	}
+	readBounded(r, w, 16*1024)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		s.decodeErr(w, err)
+		return
+	}
+	m, err := s.v.LoadMeta(r.Context())
+	if err != nil {
+		s.internalErr(w, r, err)
+		return
+	}
+	if m.Mode == vault.ModeNoPassword {
+		err = s.v.UnlockMachineKey(r.Context())
+	} else {
+		err = s.v.UnlockWithPassword(r.Context(), in.Password)
+	}
+	if err != nil {
+		http.Error(w, "unlock failed", http.StatusUnauthorized)
+		return
+	}
+	s.lastActivity.Store(time.Now().Unix())
+	s.writeJSON(w, map[string]bool{"ok": true})
 }
 
 type secretJSON struct {
@@ -623,14 +694,80 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ct := "application/octet-stream"
+	ext := in.Format
 	if in.Format == "aegis" {
 		ct = "application/json"
+		ext = "aegis.json"
 	} else if in.Format == "otpauth" {
 		ct = "text/plain; charset=utf-8"
+		ext = "otpauth.txt"
 	}
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Content-Disposition", `attachment; filename="export-`+in.Format+`"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="export-`+ext+`"`)
 	_, _ = w.Write(data)
+}
+
+// handleMode switches the vault between password and no-password mode.
+// Backed by Vault.SetPassword / DisablePassword, which re-encrypt every
+// row under the new KEK. The vault must be unlocked — Lock() zeroing the
+// KEK would leave us unable to decrypt the rows we're about to re-write.
+// Both directions are destructive in different ways:
+//
+//   - password → no-password: weakens the vault to machine-bound only.
+//   - no-password → password: caller is responsible for remembering the
+//     password; recovery is impossible without an exported backup.
+//
+// The 8-char minimum on the new password is a UX floor, not a crypto
+// claim: Argon2id derives the KEK regardless, but anything shorter is
+// essentially "no password" anyway and gets in the way of clear warning
+// copy in the UI ("set a password" should mean something).
+func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
+	if !s.gate(r, w) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.v.IsUnlocked() {
+		http.Error(w, "vault locked", http.StatusUnauthorized)
+		return
+	}
+	var in struct {
+		Mode     string `json:"mode"`
+		Password string `json:"password"`
+	}
+	readBounded(r, w, 16*1024)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		s.decodeErr(w, err)
+		return
+	}
+	ctx := r.Context()
+	switch in.Mode {
+	case "password":
+		if len(in.Password) < 8 {
+			s.writeErr(w, http.StatusBadRequest, "password must be at least 8 characters")
+			return
+		}
+		if err := s.v.SetPassword(ctx, in.Password); err != nil {
+			s.internalErr(w, r, err)
+			return
+		}
+	case "no-password":
+		if err := s.v.DisablePassword(ctx); err != nil {
+			s.internalErr(w, r, err)
+			return
+		}
+	default:
+		s.writeErr(w, http.StatusBadRequest, "mode must be 'password' or 'no-password'")
+		return
+	}
+	m, _ := s.v.LoadMeta(ctx)
+	out := "password"
+	if m.Mode == vault.ModeNoPassword {
+		out = "no-password"
+	}
+	s.writeJSON(w, map[string]any{"ok": true, "mode": out})
 }
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {

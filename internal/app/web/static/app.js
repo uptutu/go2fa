@@ -112,6 +112,11 @@ const dict = {
     detail_notes: 'Notes',
     qr_show: 'Show QR',
     refresh_now: 'Refresh',
+    unlock_title: 'Vault locked',
+    unlock_body: 'The vault was locked after a period of inactivity. Enter your master password to unlock it.',
+    unlock_password_label: 'Master password',
+    unlock_submit: 'Unlock',
+    unlock_err: 'Unlock failed — wrong password?',
   },
   zh: {
     app_title: '2fa — TOTP 金库',
@@ -216,6 +221,11 @@ const dict = {
     refresh_now: '立即刷新',
     no_match_title: '无匹配结果',
     no_match_body: '没有匹配 “{q}” 的条目。换个关键词试试,或清空搜索框。',
+    unlock_title: '金库已锁定',
+    unlock_body: '金库因长时间无操作已自动锁定。输入主密码解锁。',
+    unlock_password_label: '主密码',
+    unlock_submit: '解锁',
+    unlock_err: '解锁失败——密码错误?',
   },
 };
 
@@ -312,6 +322,73 @@ function promptForToken() {
       if (e.key === 'Enter') { e.preventDefault(); cleanup(input.value.trim()); }
     };
   });
+}
+
+/* -------- Vault unlock (idle auto-lock / manual lock) --------
+ * The server locks the vault after 15 idle minutes. Status polling
+ * notices (unlocked:false) and we prompt here. For no-password vaults
+ * the password field is hidden — a bare POST re-derives the machine key.
+ */
+let unlockPending = false;
+
+async function postUnlock(password) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['X-Auth-Token'] = authToken;
+  const res = await fetch('/api/unlock', { method: 'POST', headers, body: JSON.stringify({ password }) });
+  if (res.ok) return true;
+  let msg = '';
+  try { msg = (await res.text()) || ''; } catch (_) { /* ignore */ }
+  throw new Error(msg || `HTTP ${res.status}`);
+}
+
+function promptForUnlock(noPassword) {
+  return new Promise((resolve) => {
+    const scrim = $('#unlock');
+    const input = $('#unlock-pass');
+    const field = $('#unlock-field');
+    $('#unlock-err').textContent = '';
+    input.value = '';
+    field.style.display = noPassword ? 'none' : '';
+    showScrim(scrim);
+    if (!noPassword) setTimeout(() => input.focus(), 50);
+    const cleanup = (val) => {
+      hideScrim(scrim);
+      $$('[data-unlock]', scrim).forEach((b) => { b.onclick = null; });
+      input.onkeydown = null;
+      resolve(val);
+    };
+    $$('[data-unlock]', scrim).forEach((b) => {
+      b.onclick = async () => {
+        if (b.dataset.unlock !== 'yes') return cleanup(false);
+        try {
+          await postUnlock(input.value);
+          cleanup(true);
+        } catch (e) {
+          $('#unlock-err').textContent = t('unlock_err');
+        }
+      };
+    });
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $('[data-unlock="yes"]', scrim).click(); }
+    };
+  });
+}
+
+async function ensureUnlocked() {
+  if (unlockPending) return;
+  unlockPending = true;
+  try {
+    const ok = await promptForUnlock(state.status && state.status.mode === 'no-password');
+    if (ok) {
+      await refreshAll();
+    } else {
+      state.secrets = [];
+      renderGroups();
+      renderSecrets();
+    }
+  } finally {
+    unlockPending = false;
+  }
 }
 
 /* -------- Utilities -------- */
@@ -534,6 +611,7 @@ async function loadStatus() {
     state.status = { error: /** @type any */ (e).message || String(e) };
   }
   renderStatus();
+  if (state.status && state.status.unlocked === false) ensureUnlocked();
 }
 
 /* -------- Groups sidebar -------- */
@@ -1266,7 +1344,10 @@ async function refreshSecrets() {
   try {
     state.secrets = await api('/api/secrets') || [];
   } catch (e) {
-    toast(t('toast_load_failed', { err: e.message }), 'bad');
+    // While locked the unlock prompt is already showing; don't stack toasts.
+    if (!(state.status && state.status.unlocked === false)) {
+      toast(t('toast_load_failed', { err: /** @type any */ (e).message || String(e) }), 'bad');
+    }
     state.secrets = [];
   }
   renderGroups();

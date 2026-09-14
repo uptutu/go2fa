@@ -459,3 +459,106 @@ func TestAPISecretOtpauth(t *testing.T) {
 		t.Fatal("no secret in re-parsed URI")
 	}
 }
+
+// TestAPIUnlockFlow: lock the vault and verify the lock surface —
+// secrets return 423, unlock with the wrong password is rejected, unlock
+// with the right password restores access.
+func TestAPIUnlockFlow(t *testing.T) {
+	dir := t.TempDir()
+	st, err := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	v := vault.NewForTesting(st, dir)
+	if err := v.Init(context.Background(), vault.ModePassword, "pw123"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	srv, err := New("127.0.0.1:0", v, "")
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	if _, err := srv.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(); _ = v.Close() })
+
+	if err := v.UpsertSecret(context.Background(), vault.Secret{Issuer: "A", SecretRaw: []byte("XXXX"), Algorithm: totp.SHA1}); err != nil {
+		t.Fatal(err)
+	}
+	v.Lock()
+
+	res, err := http.Get("http://" + srv.Addr() + "/api/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusLocked {
+		t.Fatalf("locked list: got %d, want 423", res.StatusCode)
+	}
+
+	post := func(pw string) int {
+		body, _ := json.Marshal(map[string]string{"password": pw})
+		res, err := http.Post("http://"+srv.Addr()+"/api/unlock", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := post("wrong"); code != http.StatusUnauthorized {
+		t.Fatalf("wrong password: got %d, want 401", code)
+	}
+	if code := post("pw123"); code != http.StatusOK {
+		t.Fatalf("right password: got %d, want 200", code)
+	}
+
+	res, err = http.Get("http://" + srv.Addr() + "/api/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list after unlock: got %d, want 200", res.StatusCode)
+	}
+}
+
+// TestAPIUnlockNoPasswordMode: a locked no-password vault unlocks via a
+// bare POST (machine key re-derived server-side, no password needed).
+func TestAPIUnlockNoPasswordMode(t *testing.T) {
+	dir := t.TempDir()
+	st, err := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	v := vault.NewForTesting(st, dir)
+	if err := v.Init(context.Background(), vault.ModeNoPassword, ""); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	srv, err := New("127.0.0.1:0", v, "")
+	if err != nil {
+		t.Fatalf("server: %v", err)
+	}
+	if _, err := srv.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(); _ = v.Close() })
+	v.Lock()
+
+	res, err := http.Get("http://" + srv.Addr() + "/api/secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusLocked {
+		t.Fatalf("locked list: got %d, want 423", res.StatusCode)
+	}
+
+	res, err = http.Post("http://"+srv.Addr()+"/api/unlock", "application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unlock: got %d, want 200", res.StatusCode)
+	}
+}
