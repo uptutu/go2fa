@@ -648,7 +648,7 @@ func TestAPIModeSwitch(t *testing.T) {
 		http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
 			bytes.NewBufferString(`{"uri":"`+uri+`"}`))
 
-		res, body := post(t, srv, `{"mode":"no-password"}`)
+		res, body := post(t, srv, `{"mode":"no-password","current_password":"originalpass"}`)
 		if res.StatusCode != 200 {
 			t.Fatalf("switch: %d %s", res.StatusCode, body)
 		}
@@ -756,7 +756,7 @@ func TestAPIModeSwitch(t *testing.T) {
 
 		// no-password → password → no-password.
 		post(t, srv, `{"mode":"password","password":"newmasterpass","confirm":"newmasterpass"}`)
-		post(t, srv, `{"mode":"no-password"}`)
+		post(t, srv, `{"mode":"no-password","current_password":"newmasterpass"}`)
 
 		res, _ := http.Get("http://" + srv.Addr() + "/api/secrets")
 		var list []secretJSON
@@ -773,6 +773,84 @@ func TestAPIModeSwitch(t *testing.T) {
 		if len(gs) != 1 || gs[0].Name != "Work" {
 			t.Errorf("groups after round-trip: %+v", gs)
 		}
+	})
+
+	// Disable-password is destructive: server must prove the caller
+	// knows the existing password before rekeying. Bug fix: an empty
+	// current_password must NOT pass through — otherwise any client can
+	// weaken the vault by sending {mode:"no-password"} with an empty
+	// field, defeating the entire gate.
+	t.Run("password → no-password requires current password", func(t *testing.T) {
+		pwSrv := func(t *testing.T) *Server {
+			t.Helper()
+			dir := t.TempDir()
+			st, _ := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+			v := vault.NewForTesting(st, dir)
+			if err := v.Init(context.Background(), vault.ModePassword, "originalpass"); err != nil {
+				t.Fatal(err)
+			}
+			srv, _ := New("127.0.0.1:0", v, "")
+			srv.Start(context.Background())
+			t.Cleanup(func() { srv.Stop(); v.Close() })
+			return srv
+		}
+
+		t.Run("empty current_password rejected", func(t *testing.T) {
+			srv := pwSrv(t)
+			res, _ := post(t, srv, `{"mode":"no-password"}`)
+			if res.StatusCode != http.StatusUnauthorized {
+				t.Errorf("empty current_password: want 401, got %d", res.StatusCode)
+			}
+			// And mode didn't flip.
+			res2, _ := http.Get("http://" + srv.Addr() + "/api/status")
+			var st map[string]any
+			json.NewDecoder(res2.Body).Decode(&st)
+			res2.Body.Close()
+			if st["mode"] != "password" {
+				t.Errorf("mode flipped despite rejection: %v", st["mode"])
+			}
+		})
+
+		t.Run("wrong current_password rejected", func(t *testing.T) {
+			srv := pwSrv(t)
+			res, _ := post(t, srv, `{"mode":"no-password","current_password":"WRONG"}`)
+			if res.StatusCode != http.StatusUnauthorized {
+				t.Errorf("wrong current_password: want 401, got %d", res.StatusCode)
+			}
+			res2, _ := http.Get("http://" + srv.Addr() + "/api/status")
+			var st map[string]any
+			json.NewDecoder(res2.Body).Decode(&st)
+			res2.Body.Close()
+			if st["mode"] != "password" {
+				t.Errorf("mode flipped on wrong password: %v", st["mode"])
+			}
+		})
+
+		t.Run("correct current_password accepted", func(t *testing.T) {
+			srv := pwSrv(t)
+			res, body := post(t, srv, `{"mode":"no-password","current_password":"originalpass"}`)
+			if res.StatusCode != 200 {
+				t.Fatalf("correct current_password: %d %s", res.StatusCode, body)
+			}
+			res2, _ := http.Get("http://" + srv.Addr() + "/api/status")
+			var st map[string]any
+			json.NewDecoder(res2.Body).Decode(&st)
+			res2.Body.Close()
+			if st["mode"] != "no-password" {
+				t.Errorf("mode after correct disable: %v", st["mode"])
+			}
+		})
+
+		t.Run("no-password vault skips the gate", func(t *testing.T) {
+			// From no-password, going to no-password is a no-op rekey
+			// (machine key stays the machine key). The gate doesn't
+			// apply — there's no password to verify.
+			srv := newTestServer(t) // ModeNoPassword
+			res, _ := post(t, srv, `{"mode":"no-password"}`)
+			if res.StatusCode != 200 {
+				t.Errorf("no-password → no-password: want 200, got %d", res.StatusCode)
+			}
+		})
 	})
 }
 

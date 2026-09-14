@@ -213,11 +213,53 @@ func (v *Vault) SetPassword(ctx context.Context, newPassword string) error {
 
 // DisablePassword transitions a vault from password mode to no-password.
 // WARNING: weakens the vault to machine-bound only.
+//
+// Callers that expose this from a trust boundary (e.g. the web API) MUST
+// first prove the requester knows the existing password — see
+// VerifyCurrentPassword. Re-deriving the KEK from the meta salt costs
+// one Argon2id run, but the value of "I just disabled password
+// protection" is worth proving the caller already had access.
 func (v *Vault) DisablePassword(ctx context.Context) error {
 	if !v.IsUnlocked() {
 		return ErrLocked
 	}
 	return v.reInitWith(ctx, ModeNoPassword, "")
+}
+
+// VerifyCurrentPassword re-derives the KEK from password + meta salt and
+// checks it against the in-memory verifier. Used by callers that want
+// to confirm an action that weakens the vault (disable password) without
+// the full Lock/Unlock round-trip — the vault stays unlocked on success
+// and on failure.
+//
+// Only meaningful in ModePassword vaults; for ModeNoPassword the result
+// is "no password to verify, nothing to do" and the caller should skip
+// the check.
+func (v *Vault) VerifyCurrentPassword(ctx context.Context, password string) error {
+	if !v.IsUnlocked() {
+		return ErrLocked
+	}
+	m, err := v.LoadMeta(ctx)
+	if err != nil {
+		return err
+	}
+	if m.Mode != ModePassword {
+		return errors.New("vault: not in password mode")
+	}
+	if password == "" {
+		return errors.New("vault: wrong password")
+	}
+	// Re-derive in a scratch buffer; never replace the live KEK so a
+	// successful verify is a no-op for the in-memory state.
+	candidate := crypto.DeriveKey(password, m.KDFSalt)
+	sealed := append(append([]byte(nil), m.VerifierNonce...), m.Verifier...)
+	plain, err := crypto.Open(candidate, sealed, nil)
+	if err != nil || string(plain) != "OK" {
+		// Don't leak which leg of the check failed: a wrong password and
+		// a corrupt verifier look the same to the caller.
+		return errors.New("vault: wrong password")
+	}
+	return nil
 }
 
 // reInitWith wipes and rebuilds the vault under a fresh KEK (different

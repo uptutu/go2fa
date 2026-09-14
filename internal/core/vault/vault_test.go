@@ -227,3 +227,33 @@ func TestSetPasswordRejectsBlank(t *testing.T) {
 		}
 	}
 }
+
+// TestVerifyCurrentPassword: prove-knowledge gate for destructive ops
+// that weaken the vault (DisablePassword). Correct password succeeds;
+// wrong / empty fails; mode mismatch fails; vault stays unlocked on
+// either outcome.
+func TestVerifyCurrentPassword(t *testing.T) {
+	ctx := context.Background()
+	v := newTestVault(t, ModePassword, "rightpw")
+	if err := v.VerifyCurrentPassword(ctx, "rightpw"); err != nil {
+		t.Errorf("correct pw: %v", err)
+	}
+	for _, bad := range []string{"wrong", "", "        "} {
+		if err := v.VerifyCurrentPassword(ctx, bad); err == nil {
+			t.Errorf("pw %q should fail", bad)
+		}
+	}
+	// Vault must still be unlocked + secrets still decrypt after a failed
+	// verify (we never touched the live KEK).
+	all, err := v.ListSecrets(ctx)
+	if err != nil || len(all) != 0 {
+		t.Errorf("unlock state after failed verify: secrets=%d err=%v", len(all), err)
+	}
+
+	// No-password vault: verify is a no-op reject — there's nothing to
+	// prove, so callers must skip the check on this branch.
+	v2 := newTestVault(t, ModeNoPassword, "")
+	if err := v2.VerifyCurrentPassword(ctx, "anything"); err == nil {
+		t.Error("no-password vault should refuse verify (caller must skip the gate)")
+	}
+}

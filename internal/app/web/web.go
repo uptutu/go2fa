@@ -787,9 +787,10 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Mode     string `json:"mode"`
-		Password string `json:"password"`
-		Confirm  string `json:"confirm"`
+		Mode           string `json:"mode"`
+		Password       string `json:"password"`
+		Confirm        string `json:"confirm"`
+		CurrentPassword string `json:"current_password"`
 	}
 	readBounded(r, w, 16*1024)
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -797,6 +798,11 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	// Disable-password is destructive (weaken to machine-bound): the
+	// server must prove the caller already knows the existing password
+	// before rekeying. The UI also gates this with its own password
+	// field, but trust belongs on the server: a buggy/hostile client
+	// must not be able to skip the check by leaving the field empty.
 	switch in.Mode {
 	case "password":
 		// TrimSpace: reject pure-whitespace input. Trim then check length
@@ -817,6 +823,19 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "no-password":
+		m, _ := s.v.LoadMeta(ctx)
+		if m.Mode == vault.ModePassword {
+			if in.CurrentPassword == "" {
+				s.writeAPIError(w, http.StatusUnauthorized, "mode_pw_required",
+					"current password is required to disable password protection")
+				return
+			}
+			if err := s.v.VerifyCurrentPassword(ctx, in.CurrentPassword); err != nil {
+				s.writeAPIError(w, http.StatusUnauthorized, "mode_pw_wrong",
+					"current password is incorrect")
+				return
+			}
+		}
 		if err := s.v.DisablePassword(ctx); err != nil {
 			s.internalErr(w, r, err)
 			return

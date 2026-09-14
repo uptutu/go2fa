@@ -113,10 +113,11 @@ const dict = {
     qr_show: 'Show QR',
     refresh_now: 'Refresh',
     unlock_title: 'Vault locked',
-    unlock_body: 'The vault was locked after a period of inactivity. Enter your master password to unlock it.',
+    unlock_body: 'Enter your master password to unlock the vault.',
     unlock_password_label: 'Master password',
     unlock_submit: 'Unlock',
     unlock_err: 'Unlock failed — wrong password?',
+    unlock_action: 'Unlock',
     mode_btn_set: 'Set password',
     mode_btn_disable: 'Disable password',
     mode_set_title: 'Set a master password',
@@ -129,6 +130,9 @@ const dict = {
     mode_pw_mismatch: 'Passwords do not match',
     mode_pw_short: 'Password must be at least 8 characters and not blank',
     mode_pw_whitespace: 'Password cannot be only whitespace',
+    mode_current_pw_label: 'Current password',
+    mode_current_pw_required: 'Enter your current password to disable password protection',
+    mode_pw_wrong: 'Current password is incorrect',
     mode_confirm_required: 'Please check the confirmation box to continue',
     mode_confirm_disable: 'I understand anyone with disk access on this machine can decrypt the vault',
     mode_confirm_set: 'I will remember this password — there is no way to recover it',
@@ -239,10 +243,11 @@ const dict = {
     no_match_title: '无匹配结果',
     no_match_body: '没有匹配 “{q}” 的条目。换个关键词试试,或清空搜索框。',
     unlock_title: '金库已锁定',
-    unlock_body: '金库因长时间无操作已自动锁定。输入主密码解锁。',
+    unlock_body: '输入主密码以解锁金库。',
     unlock_password_label: '主密码',
     unlock_submit: '解锁',
     unlock_err: '解锁失败——密码错误?',
+    unlock_action: '解锁',
     mode_btn_set: '设置密码',
     mode_btn_disable: '关闭密码保护',
     mode_set_title: '设置主密码',
@@ -255,6 +260,9 @@ const dict = {
     mode_pw_mismatch: '两次密码不一致',
     mode_pw_short: '密码至少 8 位且不能全是空格',
     mode_pw_whitespace: '密码不能全是空白字符',
+    mode_current_pw_label: '当前密码',
+    mode_current_pw_required: '请输入当前密码以关闭密码保护',
+    mode_pw_wrong: '当前密码不正确',
     mode_confirm_required: '请先勾选确认框再继续',
     mode_confirm_disable: '我理解:任何可访问本机磁盘的人都能解密金库',
     mode_confirm_set: '我会记牢这个密码——无法找回',
@@ -379,16 +387,14 @@ async function postUnlock(password) {
   throw new Error(msg || `HTTP ${res.status}`);
 }
 
-function promptForUnlock(noPassword) {
+function promptForUnlock() {
   return new Promise((resolve) => {
     const scrim = $('#unlock');
     const input = $('#unlock-pass');
-    const field = $('#unlock-field');
     $('#unlock-err').textContent = '';
     input.value = '';
-    field.style.display = noPassword ? 'none' : '';
     showScrim(scrim);
-    if (!noPassword) setTimeout(() => input.focus(), 50);
+    setTimeout(() => input.focus(), 50);
     const cleanup = (val) => {
       hideScrim(scrim);
       $$('[data-unlock]', scrim).forEach((b) => { b.onclick = null; });
@@ -416,7 +422,15 @@ async function ensureUnlocked() {
   if (unlockPending) return;
   unlockPending = true;
   try {
-    const ok = await promptForUnlock(state.status && state.status.mode === 'no-password');
+    // No-password vaults unlock by re-deriving the machine key on the
+    // server — nothing for the user to type, so skip the dialog entirely
+    // instead of showing a password prompt with a hidden field.
+    if (state.status && state.status.mode === 'no-password') {
+      await postUnlock('');
+      await refreshAll();
+      return;
+    }
+    const ok = await promptForUnlock(false);
     if (ok) {
       await refreshAll();
     } else {
@@ -450,6 +464,7 @@ function setModeDialogLabels() {
   $('#mode-pw-label').textContent = t('mode_pw_label');
   $('#mode-pw2-label').textContent = t('mode_pw2_label');
   $('#mode-confirm-label').textContent = wantPassword ? t('mode_confirm_set') : t('mode_confirm_disable');
+  $('#mode-current-pw-label').textContent = t('mode_current_pw_label');
   $('#mode-go').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
 }
 
@@ -461,10 +476,13 @@ function openModeDialog() {
     return;
   }
   const wantPassword = state.status.mode !== 'password';
+  const fromPassword = state.status.mode === 'password';
   modeScrim.dataset.targetMode = wantPassword ? 'password' : 'no-password';
   $('#mode-pw-fields').hidden = !wantPassword;
+  $('#mode-current-pw-field').hidden = !(fromPassword && !wantPassword);
   $('#mode-pw').value = '';
   $('#mode-pw2').value = '';
+  $('#mode-current-pw').value = '';
   $('#mode-confirm').checked = false;
   // Gate the submit button on the destructive confirmation checkbox.
   // The server still re-checks, but the disabled state stops an
@@ -481,7 +499,10 @@ function openModeDialog() {
   setModeDialogLabels();
   showScrim(modeScrim);
   // Focus the first relevant field so Enter / Tab flow sensibly.
-  setTimeout(() => (wantPassword ? $('#mode-pw') : $('#mode-confirm')).focus(), 50);
+  let focusEl = $('#mode-confirm');
+  if (wantPassword) focusEl = $('#mode-pw');
+  else if (fromPassword) focusEl = $('#mode-current-pw');
+  setTimeout(() => focusEl.focus(), 50);
 }
 
 async function submitModeSwitch() {
@@ -493,6 +514,8 @@ async function submitModeSwitch() {
     return;
   }
   let password = '';
+  let currentPassword = '';
+  const fromPassword = state.status && state.status.mode === 'password';
   if (target === 'password') {
     const pw = $('#mode-pw').value;
     const pw2 = $('#mode-pw2').value;
@@ -507,6 +530,16 @@ async function submitModeSwitch() {
     }
     if (pw !== pw2) { errEl.textContent = t('mode_pw_mismatch'); return; }
     password = pw;
+  } else if (fromPassword) {
+    // Disabling password: prove the requester already had access by
+    // re-entering the current password. Server verifies this against
+    // the in-memory KEK before rekeying — the UI gate is for UX, the
+    // server gate is the real boundary.
+    currentPassword = $('#mode-current-pw').value;
+    if (currentPassword === '') {
+      errEl.textContent = t('mode_current_pw_required');
+      return;
+    }
   }
   const go = $('#mode-go');
   go.disabled = true;
@@ -515,8 +548,9 @@ async function submitModeSwitch() {
   try {
     // Send both fields: the server enforces confirm == password on the
     // wire so a buggy/hostile client can't rekey the vault with a value
-    // the user never saw confirmed.
-    const body = JSON.stringify({ mode: target, password, confirm: password });
+    // the user never saw confirmed. current_password is only meaningful
+    // for password → no-password; server ignores it otherwise.
+    const body = JSON.stringify({ mode: target, password, confirm: password, current_password: currentPassword });
     const headers = { 'Content-Type': 'application/json' };
     if (authToken) headers['X-Auth-Token'] = authToken;
     const res = await fetch('/api/mode', { method: 'POST', headers, body });
@@ -781,6 +815,13 @@ function renderStatus() {
     $('#mode-btn-label', modeBtn).textContent =
       s.mode === 'password' ? t('mode_btn_disable') : t('mode_btn_set');
   }
+  // Re-entry into the unlock dialog. The dialog can be dismissed via
+  // Cancel, leaving the user on an empty main view with no way back —
+  // show this button whenever the vault is locked so they can re-open
+  // it. There is no server-side manual-lock endpoint, so the button
+  // never means "lock" in the current build.
+  const lockBtn = $('#lock-btn');
+  if (lockBtn) lockBtn.hidden = !!s.unlocked;
 }
 
 async function loadStatus() {
@@ -1625,15 +1666,14 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#mode-confirm').addEventListener('change', (e) => {
     $('#mode-go').disabled = !e.target.checked;
   });
-  // Defensive: keep #lock-btn hidden. The HTML has `hidden` set, but CSS
-  // (.btn = inline-flex) and stale embedded assets in older builds can
-  // surface it. There is no server-side lock endpoint to invoke.
+  // Re-open the unlock dialog from the top bar when the vault is locked.
+  // renderStatus() controls visibility — the button only shows up when
+  // !state.status.unlocked. No server-side manual-lock endpoint exists,
+  // so the button never means "lock"; it only means "unlock".
   const lockBtn = $('#lock-btn');
-  if (lockBtn) lockBtn.hidden = true;
-  lockBtn && lockBtn.addEventListener('click', () => {
-    toast(t('toast_refresh'), 'good');
-    setTimeout(() => location.reload(), 600);
-  });
+  if (lockBtn) {
+    lockBtn.addEventListener('click', () => { ensureUnlocked(); });
+  }
 
   // Select-all + export
   $('#select-all').addEventListener('change', (e) => {

@@ -1401,6 +1401,14 @@
       <input id="q" type="search" data-i18n-placeholder="search_placeholder" autocomplete="off" spellcheck="false">
     </label>
     <span id="status" class="status" aria-live="polite"><span class="dot"></span><span class="label">…</span><span class="addr"></span></span>
+    <!-- Mode toggle lives next to the status pill: the button describes
+         a property of the vault (whether it has a password), so it sits
+         beside the indicator that shows that property, not in the
+         secret-list toolbar where multi-select / Export / Add live. -->
+    <button id="mode-btn" class="btn ghost" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span id="mode-btn-label">…</span>
+    </button>
     <div class="theme-anchor">
       <button id="theme-btn" class="btn ghost" type="button" aria-haspopup="dialog" aria-expanded="false" data-i18n-aria="theme_aria" data-i18n-title="theme_aria">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
@@ -1466,11 +1474,7 @@
       </button>
       <span style="flex:1"></span>
       <button id="scan-btn" class="btn" type="button"><span data-i18n="scan_qr">Scan QR</span></button>
-      <button id="lock-btn" class="btn ghost" type="button" data-i18n="lock" hidden>Lock</button>
-      <button id="mode-btn" class="btn ghost" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        <span id="mode-btn-label">…</span>
-      </button>
+      <button id="lock-btn" class="btn ghost" type="button" data-i18n="unlock_action" hidden>Unlock</button>
       <button id="add-btn" class="btn primary" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span data-i18n="add_secret">Add secret</span>
@@ -1665,6 +1669,15 @@
           <input id="mode-show" type="checkbox">
           <span data-i18n="mode_show_password">Show password</span>
         </label>
+      </div>
+      <!-- Disable-password gate: shown only when target=no-password AND
+           the vault currently has a password. Re-entering the existing
+           password proves the requester had access before the rekey —
+           otherwise a stolen browser tab could weaken the vault with
+           one click. -->
+      <div class="field" id="mode-current-pw-field" hidden style="margin-top:14px">
+        <label for="mode-current-pw" id="mode-current-pw-label">Current password</label>
+        <input id="mode-current-pw" type="password" autocomplete="current-password" spellcheck="false">
       </div>
       <label class="check" id="mode-confirm-row" style="margin-top:14px">
         <input id="mode-confirm" type="checkbox">
