@@ -4,7 +4,6 @@
 //
 //	init         initialize a vault (prompts for password unless --no-password)
 //	unlock       prompt for password and load KEK into the running process
-//	lock         zero the in-memory KEK
 //	list         list secrets
 //	add          add a secret (URI or interactive)
 //	copy         print current TOTP code to stdout and clipboard if available
@@ -25,8 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -34,6 +31,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/uptutu/go2fa/internal/core/clipboard"
 	"github.com/uptutu/go2fa/internal/core/importexport"
 	"github.com/uptutu/go2fa/internal/core/otpauth"
 	"github.com/uptutu/go2fa/internal/core/totp"
@@ -150,51 +148,6 @@ func yesNo(q string) bool {
 	}
 	return false
 }
-
-// copyToClipboard writes s to the system clipboard using platform commands.
-func copyToClipboard(s string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "windows":
-		cmd = exec.Command("clip")
-	default:
-		for _, bin := range []string{"wl-copy", "xclip", "xsel"} {
-			if _, err := exec.LookPath(bin); err == nil {
-				switch bin {
-				case "wl-copy":
-					cmd = exec.Command("wl-copy")
-				case "xclip":
-					cmd = exec.Command("xclip", "-selection", "clipboard")
-				default:
-					cmd = exec.Command("xsel", "--clipboard", "--input")
-				}
-				break
-			}
-		}
-	}
-	if cmd == nil {
-		return
-	}
-	cmd.Stdin = &stringReadCloser{s: s}
-	_ = cmd.Run()
-}
-
-type stringReadCloser struct {
-	s string
-	o int
-}
-
-func (r *stringReadCloser) Read(p []byte) (int, error) {
-	if r.o >= len(r.s) {
-		return 0, os.ErrClosed
-	}
-	n := copy(p, r.s[r.o:])
-	r.o += n
-	return n, nil
-}
-func (r *stringReadCloser) Close() error { return nil }
 
 // --- commands ---
 
@@ -384,7 +337,7 @@ var cmdCopy = &cobra.Command{
 			return err
 		}
 		fmt.Fprintln(os.Stdout, code)
-		copyToClipboard(code)
+		clipboard.Write(code)
 		_ = v.TouchLastUsed(ctx, s.ID)
 		if rem <= 5 {
 			fmt.Fprintf(os.Stderr, "(code expires in %ds)\n", rem)
@@ -660,12 +613,27 @@ var cmdImport = &cobra.Command{
 			}
 			gid[g.Name] = newID
 		}
+		// Skip duplicates: same issuer+account already stored under a
+		// different UUID (typical when re-importing an otpauth:// list, which
+		// carries no UUIDs). Entries that keep their original UUID still
+		// upsert, so re-importing an Aegis/.2fa export updates in place.
+		existingSecrets, _ := v.ListSecrets(ctx)
+		have := make(map[string]uuid.UUID, len(existingSecrets))
+		for _, es := range existingSecrets {
+			have[es.Issuer+"\x00"+es.Account] = es.ID
+		}
+		skipped := 0
 		for _, s := range res.Secrets {
+			if id, ok := have[s.Issuer+"\x00"+s.Account]; ok && id != s.ID {
+				skipped++
+				continue
+			}
 			if err := v.UpsertSecret(ctx, s); err != nil {
 				return err
 			}
 		}
-		fmt.Fprintf(os.Stdout, "imported %d secrets, %d groups\n", len(res.Secrets), len(res.Groups))
+		fmt.Fprintf(os.Stdout, "imported %d secrets (%d duplicates skipped), %d groups\n",
+			len(res.Secrets)-skipped, skipped, len(res.Groups))
 		return nil
 	},
 }

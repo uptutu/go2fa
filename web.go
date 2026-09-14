@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -51,22 +52,32 @@ var cmdGUIInstall = &cobra.Command{
 	Short: "Install a desktop shortcut for the go2fa GUI on this OS",
 	Long: "Detects the current OS and writes a launcher shortcut (Linux: .desktop, " +
 		"macOS: .app bundle, Windows: .lnk) that invokes `2fa gui`. " +
-		"If --password is given and the vault does not yet exist, the vault " +
-		"is initialised in password mode with that password. The shortcut " +
-		"itself does not embed the password; on launch the GUI prompts for " +
+		"If the vault does not yet exist it is initialised in password mode: " +
+		"use --password for unattended scripts, or omit it to be prompted " +
+		"(the password then never lands in shell history). " +
+		"The shortcut itself does not embed the password; on launch the GUI prompts for " +
 		"unlock when the vault is password-protected.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pw, _ := cmd.Flags().GetString("password")
 		ctx := context.Background()
 
-		// Init the vault in password mode if missing and --password was given.
-		// The vault lives independently of the shortcut — install must be
-		// idempotent: re-running refreshes the shortcut without re-init.
+		// Init the vault in password mode if missing. --password is for
+		// unattended install scripts; interactively we prompt so the password
+		// never lands in shell history / ps.
 		exists, err := vault.Exists()
 		if err != nil {
 			return err
 		}
-		if !exists && pw != "" {
+		if !exists {
+			if pw == "" {
+				pw = promptPassword("Set master password: ")
+				if pw2 := promptPassword("Confirm: "); pw != pw2 {
+					return errors.New("passwords do not match")
+				}
+			}
+			if pw == "" {
+				return errors.New("a password is required to initialise the vault (use --password for scripts)")
+			}
 			v, err := vault.Open(ctx)
 			if err != nil {
 				return err
@@ -81,6 +92,8 @@ var cmdGUIInstall = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "vault initialised in password mode")
 		}
 
+		// The vault lives independently of the shortcut — install must be
+		// idempotent: re-running refreshes the shortcut without re-init.
 		res, err := install.Install()
 		if err != nil {
 			return err
