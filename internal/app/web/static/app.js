@@ -525,7 +525,7 @@ function createRow(s) {
       </div>`;
 
     const codeBtn = $('.code', li);
-    codeBtn.onclick = () => copyCode(s, codeBtn);
+    codeBtn.onclick = () => copyCode(s.id, codeBtn);
     $('.edit', li).onclick = () => openEdit(s);
     $('.pick-cb', li).onchange = (e) => {
       const on = /** @type {HTMLInputElement} */ (e.target).checked;
@@ -576,7 +576,13 @@ function updateSelectionUI() {
   sa.indeterminate = selectedVisible > 0 && selectedVisible < ids.length;
 }
 
-async function copyCode(s, btn) {
+async function copyCode(id, btn) {
+  // Look up the secret fresh on each click — the row's onclick closure
+  // was bound once at render time and would copy a stale code after the
+  // TOTP rotates (the visible button text updates per tick via updateRow,
+  // but the click handler kept capturing the original `s` object).
+  const s = state.secrets.find((x) => x.id === id);
+  if (!s) return;
   try {
     await navigator.clipboard.writeText(s.code);
     btn.classList.add('copied');
