@@ -1277,10 +1277,14 @@
   }
 
   /* -------- Theme picker popover -------- */
+  /* The popover is anchored to .theme-anchor (a wrapper around the theme
+   * button) via absolute positioning, so it always appears directly
+   * below the button regardless of header layout / window width. */
+  .theme-anchor { position: relative; }
   .theme-pop {
-    position: fixed;
-    top: 64px;
-    right: 18px;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
     width: 296px;
     padding: 10px;
     background: var(--dialog-bg);
@@ -1385,12 +1389,48 @@
       <input id="q" type="search" data-i18n-placeholder="search_placeholder" autocomplete="off" spellcheck="false">
     </label>
     <span id="status" class="status" aria-live="polite"><span class="dot"></span><span class="label">…</span><span class="addr"></span></span>
-    <button id="theme-btn" class="btn ghost" type="button" aria-haspopup="dialog" aria-expanded="false" data-i18n-aria="theme_aria" data-i18n-title="theme_aria">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
-        <circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18"/>
-      </svg>
-      <span id="theme-current">Aurora</span>
-    </button>
+    <div class="theme-anchor">
+      <button id="theme-btn" class="btn ghost" type="button" aria-haspopup="dialog" aria-expanded="false" data-i18n-aria="theme_aria" data-i18n-title="theme_aria">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18"/>
+        </svg>
+        <span id="theme-current">Aurora</span>
+      </button>
+      <div id="theme-pop" class="theme-pop" hidden role="dialog" aria-label="Choose theme" data-i18n-aria="theme_pop_aria">
+        <div class="theme-grid">
+          <button class="theme-card" type="button" data-theme="aurora" aria-pressed="true">
+            <span class="swatch" style="--swatch:#7cf7b1"></span>
+            <span class="name">Aurora Mint</span>
+            <span class="hint">Default</span>
+          </button>
+          <button class="theme-card" type="button" data-theme="obsidian" aria-pressed="false">
+            <span class="swatch" style="--swatch:#7dd3fc"></span>
+            <span class="name">Obsidian Slate</span>
+            <span class="hint">Cool</span>
+          </button>
+          <button class="theme-card" type="button" data-theme="dusk" aria-pressed="false">
+            <span class="swatch" style="--swatch:#c4a7ff"></span>
+            <span class="name">Dusk Violet</span>
+            <span class="hint">Warm</span>
+          </button>
+          <button class="theme-card" type="button" data-theme="paper" aria-pressed="false">
+            <span class="swatch" style="--swatch:#2f7d4f"></span>
+            <span class="name">Paper Light</span>
+            <span class="hint">Daytime</span>
+          </button>
+          <button class="theme-card" type="button" data-theme="ember" aria-pressed="false">
+            <span class="swatch" style="--swatch:#ff9966"></span>
+            <span class="name">Ember Sunset</span>
+            <span class="hint">Cozy</span>
+          </button>
+          <button class="theme-card" type="button" data-theme="mono" aria-pressed="false">
+            <span class="swatch" style="--swatch:#9aa39a"></span>
+            <span class="name">Mono Editorial</span>
+            <span class="hint">Minimal</span>
+          </button>
+        </div>
+      </div>
+    </div>
     <div class="lang-switch" role="group" data-i18n-aria="lang_switch_aria">
       <button type="button" data-lang="en" aria-pressed="true">EN</button>
       <button type="button" data-lang="zh" aria-pressed="false">中</button>
@@ -1438,43 +1478,6 @@
   </main>
 
 </div>
-
-<!-- Theme picker popover -->
-<div id="theme-pop" class="theme-pop" hidden role="dialog" aria-label="Choose theme" data-i18n-aria="theme_pop_aria">
-  <div class="theme-grid">
-    <button class="theme-card" type="button" data-theme="aurora" aria-pressed="true">
-      <span class="swatch" style="--swatch:#7cf7b1"></span>
-      <span class="name">Aurora Mint</span>
-      <span class="hint">Default</span>
-    </button>
-    <button class="theme-card" type="button" data-theme="obsidian" aria-pressed="false">
-      <span class="swatch" style="--swatch:#7dd3fc"></span>
-      <span class="name">Obsidian Slate</span>
-      <span class="hint">Cool</span>
-    </button>
-    <button class="theme-card" type="button" data-theme="dusk" aria-pressed="false">
-      <span class="swatch" style="--swatch:#c4a7ff"></span>
-      <span class="name">Dusk Violet</span>
-      <span class="hint">Warm</span>
-    </button>
-    <button class="theme-card" type="button" data-theme="paper" aria-pressed="false">
-      <span class="swatch" style="--swatch:#2f7d4f"></span>
-      <span class="name">Paper Light</span>
-      <span class="hint">Daytime</span>
-    </button>
-    <button class="theme-card" type="button" data-theme="ember" aria-pressed="false">
-      <span class="swatch" style="--swatch:#ff9966"></span>
-      <span class="name">Ember Sunset</span>
-      <span class="hint">Cozy</span>
-    </button>
-    <button class="theme-card" type="button" data-theme="mono" aria-pressed="false">
-      <span class="swatch" style="--swatch:#9aa39a"></span>
-      <span class="name">Mono Editorial</span>
-      <span class="hint">Minimal</span>
-    </button>
-  </div>
-</div>
-
 <!-- Add / Edit dialog -->
 <div id="dialog" class="scrim" role="dialog" aria-modal="true" aria-labelledby="dialog-title" hidden>
   <div class="dialog">
