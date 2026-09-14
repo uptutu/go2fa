@@ -801,6 +801,16 @@
     color: var(--text-faint);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* Fuzzy-search highlight: tint matched characters without shifting
+     layout. text-shadow gives a soft fill that survives on both light and
+     dark themes; the accent-tinted background keeps it visible on hover. */
+  .issuer mark, .account mark, .detail-grid .account-big mark, .detail-notes mark, .tag mark {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+    color: inherit;
+    border-radius: 3px;
+    padding: 0 1px;
+    text-shadow: 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
 
   .code-wrap { display: flex; align-items: center; }
   .code {

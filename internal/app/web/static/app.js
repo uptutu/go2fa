@@ -23,6 +23,8 @@ const dict = {
     secrets_aria: 'Secrets',
     empty_title: 'No secrets yet',
     empty_body: 'Add your first TOTP entry to start generating one-time codes. Paste an otpauth:// URI, type one in manually, or scan a QR code.',
+    no_match_title: 'No matches',
+    no_match_body: 'Nothing matches “{q}”. Try a different keyword, or clear the search.',
     empty_cta: 'Add your first secret',
     edit_secret: 'Edit secret',
     cancel: 'Cancel',
@@ -212,6 +214,8 @@ const dict = {
     detail_notes: '备注',
     qr_show: '显示二维码',
     refresh_now: '立即刷新',
+    no_match_title: '无匹配结果',
+    no_match_body: '没有匹配 “{q}” 的条目。换个关键词试试,或清空搜索框。',
   },
 };
 
@@ -318,6 +322,89 @@ function escapeHtml(s) {
   })[c]);
 }
 
+/* -------- Fuzzy search --------
+ * Greedy left-to-right match. Returns null if not all query chars matched
+ * in order, or { score, indices } where indices point into the original
+ * (unescaped) target string. Scoring rewards: first-char (+10), word-start
+ * after separator (+8), camelCase boundary (+4), consecutive run (+6+);
+ * penalises skipped chars (-1 each). Tight matches get a length bonus;
+ * exact substring matches get a small flat bonus.
+ */
+function fuzzyMatch(query, target) {
+  if (!query) return { score: 0, indices: [] };
+  const q = String(query).toLowerCase();
+  const t = String(target || '').toLowerCase();
+  const qlen = q.length, tlen = t.length;
+  if (tlen === 0 || qlen === 0) return null;
+  let qi = 0, ti = 0;
+  const indices = [];
+  let score = 0;
+  let run = 0;
+  while (qi < qlen && ti < tlen) {
+    if (q[qi] === t[ti]) {
+      indices.push(ti);
+      let s = 1;
+      if (ti === 0) s += 10;
+      else if (/[\s_\-./@:]/.test(t[ti - 1])) s += 8;
+      else if (/[a-z]/.test(t[ti - 1]) && /[A-Z0-9]/.test(t[ti])) s += 4;
+      if (run > 0) s += 6 + Math.min(run, 4);
+      score += s;
+      run++;
+      qi++;
+    } else {
+      score -= 1;
+      run = 0;
+    }
+    ti++;
+  }
+  if (qi < qlen) return null;
+  score += Math.max(0, 25 - tlen);
+  if (t.includes(q)) score += 5;
+  if (indices[0] === 0) score += 3;
+  return { score, indices };
+}
+
+// Wrap matched indices (in the raw text) with <mark>. Indices stay aligned
+// with the unescaped input by escaping each run separately — <mark> tags
+// themselves are never escaped, so they always parse.
+function highlight(text, indices) {
+  if (!indices || !indices.length) return escapeHtml(text || '');
+  const set = new Set(indices);
+  const t = String(text || '');
+  let out = '', buf = '', inMark = false;
+  for (let i = 0; i < t.length; i++) {
+    const matched = set.has(i);
+    if (matched !== inMark) {
+      out += escapeHtml(buf);
+      buf = '';
+      out += matched ? '<mark>' : '</mark>';
+      inMark = matched;
+    }
+    buf += t[i];
+  }
+  out += escapeHtml(buf);
+  if (inMark) out += '</mark>';
+  return out;
+}
+
+// Score a secret against the query across issuer / account / group / notes.
+// Each field contributes a weighted partial; best-field hit anchors the row.
+// Returns null when no field matched.
+function scoreSecret(q, s) {
+  const fields = [
+    { text: s.issuer || '', w: 3 },
+    { text: s.account || '', w: 2 },
+    { text: s.group_name || '', w: 1 },
+    { text: s.notes || '', w: 1 },
+  ];
+  let total = 0, any = false;
+  for (const f of fields) {
+    const m = fuzzyMatch(q, f.text);
+    if (m) { total += m.score * f.w; any = true; }
+  }
+  return any ? total : null;
+}
+
 /* -------- Theme picker --------
  * Token-driven: picking a theme just rewrites data-theme on <html>; all
  * component styles read from CSS variables, so nothing else changes.
@@ -381,19 +468,26 @@ function fmtAlgo(a) {
 }
 
 function visibleSecrets() {
-  const q = state.filter.q.trim().toLowerCase();
-  return state.secrets.filter((s) => {
-    if (state.filter.group === 'unassigned') {
-      if (s.group_id !== 0) return false;
-    } else if (typeof state.filter.group === 'number' && state.filter.group > 0) {
-      if (s.group_id !== state.filter.group) return false;
-    }
-    if (q) {
-      const hay = `${s.issuer} ${s.account || ''} ${s.group_name || ''}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
+  const q = state.filter.q.trim();
+  const group = state.filter.group;
+  const passes = (s) => {
+    if (group === 'unassigned') return s.group_id === 0;
+    if (typeof group === 'number' && group > 0) return s.group_id === group;
     return true;
-  });
+  };
+  const filtered = state.secrets.filter(passes);
+  if (!q) return filtered;
+  // Fuzzy rank: best match first. Pre-grouping keeps the score field-keyed
+  // (cheap to recompute per row; total cost stays O(rows * fields)).
+  const scored = [];
+  for (const s of filtered) {
+    const score = scoreSecret(q, s);
+    if (score != null) scored.push({ s, score });
+  }
+  scored.sort((a, b) => b.score - a.score
+    || a.s.issuer.localeCompare(b.s.issuer)
+    || (a.s.account || '').localeCompare(b.s.account || ''));
+  return scored.map((x) => x.s);
 }
 
 /* -------- Toasts -------- */
@@ -550,12 +644,18 @@ function updateRow(li, s) {
   }
   const aria = t('code_aria', { digits: String(s.digits || 6), issuer: s.issuer });
   if (codeBtn.getAttribute('aria-label') !== aria) codeBtn.setAttribute('aria-label', aria);
+  const q = state.filter.q.trim();
+  const mIssuer = q ? fuzzyMatch(q, s.issuer) : null;
+  const mAccount = q ? fuzzyMatch(q, s.account || '') : null;
+  const mGroup = q ? fuzzyMatch(q, s.group_name || '') : null;
+  const mNotes = q ? fuzzyMatch(q, s.notes || '') : null;
   const groupTag = s.group_id > 0 && s.group_name
-    ? `<span class="tag">${escapeHtml(s.group_name)}</span>` : '';
-  const issuerHtml = `${escapeHtml(s.issuer || t('no_issuer'))}${groupTag}`;
+    ? `<span class="tag">${mGroup ? highlight(s.group_name, mGroup.indices) : escapeHtml(s.group_name)}</span>` : '';
+  const issuerHtml = `${mIssuer ? highlight(s.issuer || t('no_issuer'), mIssuer.indices) : escapeHtml(s.issuer || t('no_issuer'))}${groupTag}`;
   const issuerEl = $('.issuer', li);
   if (issuerEl.innerHTML !== issuerHtml) issuerEl.innerHTML = issuerHtml;
-  const accountHtml = `${escapeHtml(s.account || '')}${s.notes ? ' · ' + escapeHtml(s.notes) : ''}`;
+  const accountHtml = (mAccount ? highlight(s.account || '', mAccount.indices) : escapeHtml(s.account || ''))
+    + (s.notes ? (mAccount ? ' · ' : ' · ') + (mNotes ? highlight(s.notes, mNotes.indices) : escapeHtml(s.notes)) : '');
   const accountEl = $('.account', li);
   if (accountEl.innerHTML !== accountHtml) accountEl.innerHTML = accountHtml;
   const cb = $('.pick-cb', li);
@@ -572,10 +672,16 @@ function fillDetail(li, s) {
   const det = $('.detail', li);
   if (!det) return;
 
+  const q = state.filter.q.trim();
+  const mAccount = q ? fuzzyMatch(q, s.account || '') : null;
+  const mNotes = q ? fuzzyMatch(q, s.notes || '') : null;
+
   const accField = $('.detail-field-account', det);
   if (s.account && s.account.trim()) {
     accField.hidden = false;
-    $('.account-big', accField).textContent = s.account;
+    const el = $('.account-big', accField);
+    const html = mAccount ? highlight(s.account, mAccount.indices) : escapeHtml(s.account);
+    if (el.innerHTML !== html) el.innerHTML = html;
   } else {
     accField.hidden = true;
   }
@@ -594,7 +700,9 @@ function fillDetail(li, s) {
   const notesField = $('.detail-field-notes', det);
   if (s.notes && s.notes.trim()) {
     notesField.hidden = false;
-    $('.detail-notes', notesField).textContent = s.notes;
+    const el = $('.detail-notes', notesField);
+    const html = mNotes ? highlight(s.notes, mNotes.indices) : escapeHtml(s.notes);
+    if (el.innerHTML !== html) el.innerHTML = html;
   } else {
     notesField.hidden = true;
   }
@@ -610,8 +718,16 @@ function createRow(s) {
   if (s.remaining <= 0) li.classList.add('expired');
   else if (s.remaining <= 5) li.classList.add('expiring');
 
+    const q = state.filter.q.trim();
+    const mIssuer = q ? fuzzyMatch(q, s.issuer) : null;
+    const mAccount = q ? fuzzyMatch(q, s.account || '') : null;
+    const mGroup = q ? fuzzyMatch(q, s.group_name || '') : null;
+    const mNotes = q ? fuzzyMatch(q, s.notes || '') : null;
     const groupTag = s.group_id > 0 && s.group_name
-      ? `<span class="tag">${escapeHtml(s.group_name)}</span>` : '';
+      ? `<span class="tag">${mGroup ? highlight(s.group_name, mGroup.indices) : escapeHtml(s.group_name)}</span>` : '';
+    const issuerHtml = `${mIssuer ? highlight(s.issuer || t('no_issuer'), mIssuer.indices) : escapeHtml(s.issuer || t('no_issuer'))}${groupTag}`;
+    const accountHtml = (mAccount ? highlight(s.account || '', mAccount.indices) : escapeHtml(s.account || ''))
+      + (s.notes ? ' · ' + (mNotes ? highlight(s.notes, mNotes.indices) : escapeHtml(s.notes)) : '');
     const fmt = codeFmt(s);
     const checked = state.selected.has(s.id) ? 'checked' : '';
 
@@ -629,8 +745,8 @@ function createRow(s) {
         <span class="num">${Math.max(0, s.remaining)}</span>
       </div>
       <div class="who">
-        <div class="issuer">${escapeHtml(s.issuer || t('no_issuer'))}${groupTag}</div>
-        <div class="account">${escapeHtml(s.account || '')}${s.notes ? ' · ' + escapeHtml(s.notes) : ''}</div>
+        <div class="issuer">${issuerHtml}</div>
+        <div class="account">${accountHtml}</div>
       </div>
       <div class="code-wrap">
         <button class="code" type="button" title="${escapeHtml(t('copy_title_attr'))}" aria-label="${escapeHtml(t('code_aria', { digits: String(s.digits || 6), issuer: s.issuer }))}">${escapeHtml(fmt)}</button>
@@ -711,8 +827,22 @@ function createRow(s) {
 // under the cursor each tick, which is what broke hover/click mid-refresh.
 function renderSecrets() {
   const list = visibleSecrets();
-  const trulyEmpty = state.secrets.length === 0; // no data at all → onboarding; filtered-empty keeps the existing copy
-  emptyEl.hidden = !trulyEmpty;
+  const hasData = state.secrets.length > 0;
+  const noMatch = hasData && list.length === 0 && state.filter.q.trim() !== '';
+  const trulyEmpty = !hasData; // no data at all → onboarding; filtered-empty keeps the existing copy
+  emptyEl.hidden = !trulyEmpty && !noMatch;
+  if (noMatch) {
+    const titleEl = emptyEl.querySelector('h3');
+    const bodyEl = emptyEl.querySelector('p');
+    if (titleEl) titleEl.textContent = t('no_match_title');
+    if (bodyEl) bodyEl.textContent = t('no_match_body', { q: state.filter.q.trim() });
+  } else if (trulyEmpty) {
+    // restore onboarding copy so toggling between no-data and no-match flips cleanly
+    const titleEl = emptyEl.querySelector('h3');
+    const bodyEl = emptyEl.querySelector('p');
+    if (titleEl) titleEl.textContent = t('empty_title');
+    if (bodyEl) bodyEl.textContent = t('empty_body');
+  }
   secretsUl.hidden = list.length === 0;
 
   const wanted = new Set(list.map((s) => s.id));
@@ -1406,5 +1536,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const got = base32Encode(ascii);
     const want = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
     if (got !== want) console.error('base32 self-test FAILED: got', got, 'want', want);
+  })();
+
+  // Self-test: fuzzy search + highlight. Catches regressions where the
+  // scoring drift demotes obvious matches or highlight injection escapes
+  // out of <mark>. Cheap: 5 vectors, runs once at load.
+  (function fuzzySelfTest() {
+    const cases = [
+      // [query, target, expected_first_index, must_contain_indices...]
+      ['aws',    'amazon web services',      0,  [0, 7, 11]],
+      ['git',   'GitHub',                   0,  [0, 1, 2]],
+      ['amzn',  'amazon-work',              null, [0, 1, 3, 5]], // q not contiguous, must still match
+      ['xyz',   'amazon',                   null, null],         // no match
+      ['',      'anything',                 null, []],            // empty query → score 0
+    ];
+    let ok = true;
+    for (const [q, tgt, firstIdx, idxs] of cases) {
+      const m = fuzzyMatch(q, tgt);
+      if (q === '') {
+        if (!m || m.score !== 0 || m.indices.length !== 0) {
+          console.error('fuzzy self-test FAILED (empty q):', m); ok = false;
+        }
+        continue;
+      }
+      if (idxs === null) {
+        if (m !== null) { console.error('fuzzy self-test FAILED (expected null):', q, tgt, m); ok = false; }
+        continue;
+      }
+      if (!m) { console.error('fuzzy self-test FAILED (no match):', q, tgt); ok = false; continue; }
+      if (m.indices[0] !== firstIdx) {
+        console.error('fuzzy self-test FAILED (first idx):', q, tgt, 'got', m.indices[0], 'want', firstIdx); ok = false;
+      }
+      for (const want of idxs) {
+        if (!m.indices.includes(want)) {
+          console.error('fuzzy self-test FAILED (missing idx):', q, tgt, 'want', want, 'got', m.indices); ok = false;
+        }
+      }
+      // Highlight should escape hostile input and never produce unescaped < or >.
+      const html = highlight('<script>', m.indices);
+      if (html.includes('<script>')) {
+        console.error('highlight self-test FAILED (XSS):', html); ok = false;
+      }
+    }
+    if (ok) console.log('fuzzy self-test ok');
   })();
 });
