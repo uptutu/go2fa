@@ -860,10 +860,28 @@ func (s *Server) handlePreferences(w http.ResponseWriter, r *http.Request) {
 		}
 		// Whitelist theme values: keep the API from accepting arbitrary
 		// strings that the client then injects into a style attribute.
+		// Empty means "no preference" and defaults to aurora so a PUT
+		// carrying only lang still round-trips cleanly.
+		if in.Theme == "" {
+			in.Theme = "aurora"
+		}
 		switch in.Theme {
 		case "aurora", "obsidian", "dusk", "paper", "ember", "mono":
 		default:
 			s.writeErr(w, http.StatusBadRequest, "unknown theme")
+			return
+		}
+		// Whitelist lang values: only the codes the frontend knows how to
+		// translate. An empty string is treated as "no preference" and
+		// defaulted to "en" — preserves the pre-lang contract where
+		// PUT {"theme":"..."} was valid on its own.
+		if in.Lang == "" {
+			in.Lang = "en"
+		}
+		switch in.Lang {
+		case "en", "zh":
+		default:
+			s.writeErr(w, http.StatusBadRequest, "unknown language")
 			return
 		}
 		if err := s.prefs.save(in); err != nil {
@@ -900,14 +918,18 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	prefs, err := s.prefs.load()
 	if err != nil {
-		// Non-fatal: if prefs fail to load, serve default theme rather
-		// than breaking the whole UI. Log so it's not silently lost.
+		// Non-fatal: if prefs fail to load, serve defaults rather than
+		// breaking the whole UI. Log so it's not silently lost.
 		log.Printf("web: load prefs: %v", err)
 		prefs.Theme = "aurora"
+		prefs.Lang = "en"
 	}
-	// Inject before the existing theme-detection script. The inline
-	// script in index.html reads window.__initialTheme first.
-	inject := fmt.Sprintf(`<script>window.__initialTheme=%q;</script>`, prefs.Theme)
+	// Inject before the existing theme/lang-detection script. The inline
+	// script in index.html reads window.__initialTheme / __initialLang
+	// first, so the very first paint already shows the saved state —
+	// no aurora→obsidian or en→zh flash on startup.
+	inject := fmt.Sprintf(`<script>window.__initialTheme=%q;window.__initialLang=%q;</script>`,
+		prefs.Theme, prefs.Lang)
 	body = bytes.Replace(body, []byte("<script>"), []byte(inject+"<script>"), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

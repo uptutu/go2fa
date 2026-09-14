@@ -10,15 +10,17 @@ import (
 	"sync"
 )
 
-// preferencesFile is the basename of the JSON file storing UI prefs (theme).
-// Lives next to vault.sqlite so backups / "reset vault" naturally cover it.
+// preferencesFile is the basename of the JSON file storing UI prefs (theme,
+// language). Lives next to vault.sqlite so backups / "reset vault"
+// naturally cover it.
 const preferencesFile = "preferences.json"
 
 // Preferences are UI-facing knobs that should survive across webview /
 // browser launches. Per-vault means per-user: when the user wipes the
-// vault they keep their theme, which is the sane default.
+// vault they keep their theme and language, which is the sane default.
 type Preferences struct {
 	Theme string `json:"theme"`
+	Lang  string `json:"lang"`
 }
 
 // prefStore is a tiny guarded cache around the on-disk preferences file.
@@ -31,13 +33,13 @@ type prefStore struct {
 
 // load returns the persisted preferences, falling back to defaults when
 // the file is missing or unparseable. A corrupt file is treated as
-// "no prefs" — the user can pick a theme again, the next PUT overwrites.
+// "no prefs" — the user can pick again, the next PUT overwrites.
 func (p *prefStore) load() (Preferences, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	b, err := os.ReadFile(p.path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Preferences{Theme: "aurora"}, nil
+		return Preferences{Theme: "aurora", Lang: "en"}, nil
 	}
 	if err != nil {
 		return Preferences{}, err
@@ -46,10 +48,13 @@ func (p *prefStore) load() (Preferences, error) {
 	if err := json.Unmarshal(b, &prefs); err != nil {
 		// Corrupt file: rather than fail closed (user sees broken UI), log
 		// and return defaults. Next successful PUT will rewrite the file.
-		return Preferences{Theme: "aurora"}, nil
+		return Preferences{Theme: "aurora", Lang: "en"}, nil
 	}
 	if prefs.Theme == "" {
 		prefs.Theme = "aurora"
+	}
+	if prefs.Lang == "" {
+		prefs.Lang = "en"
 	}
 	return prefs, nil
 }

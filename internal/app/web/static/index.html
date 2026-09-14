@@ -18,6 +18,18 @@
     var t = window.__initialTheme || localStorage.getItem('go2fa.theme') || 'aurora';
     document.documentElement.setAttribute('data-theme', t);
   } catch (_) {}
+  // Language uses the same server-authoritative pattern as theme: the
+  // user's last choice is injected into index.html so first paint is in
+  // the right language. The body of the document only finishes parsing
+  // after this script runs, so the lang-switch button labels and every
+  // data-i18n string render in the chosen language from frame zero.
+  try {
+    var l = window.__initialLang || localStorage.getItem('2fa.lang')
+      || (/^zh/i.test(navigator.language) ? 'zh' : 'en');
+    if (l !== 'en' && l !== 'zh') l = 'en';
+    document.documentElement.setAttribute('lang', l);
+    document.documentElement.setAttribute('data-lang', l);
+  } catch (_) {}
 </script>
 <style>
   /* -------- Tokens -------- */

@@ -894,6 +894,80 @@ func TestAPIPreferences(t *testing.T) {
 			t.Errorf("default inject missing:\n%s", body[:min(len(body), 600)])
 		}
 	})
+
+	t.Run("default lang when no file", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := http.Get("http://" + srv.Addr() + "/api/preferences")
+		if res.StatusCode != 200 {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+		var prefs struct{ Lang string }
+		json.NewDecoder(res.Body).Decode(&prefs)
+		res.Body.Close()
+		if prefs.Lang != "en" {
+			t.Errorf("default lang: %q", prefs.Lang)
+		}
+	})
+
+	t.Run("put then get lang round-trip", func(t *testing.T) {
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"theme":"aurora","lang":"zh"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
+		if res.StatusCode != 200 {
+			b, _ := io.ReadAll(res.Body)
+			t.Fatalf("PUT: %d %s", res.StatusCode, b)
+		}
+		res.Body.Close()
+
+		res, _ = http.Get("http://" + srv.Addr() + "/api/preferences")
+		var prefs struct{ Lang string }
+		json.NewDecoder(res.Body).Decode(&prefs)
+		res.Body.Close()
+		if prefs.Lang != "zh" {
+			t.Errorf("after PUT: %q", prefs.Lang)
+		}
+	})
+
+	t.Run("unknown lang rejected", func(t *testing.T) {
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"lang":"klingon"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
+		if res.StatusCode != 400 {
+			t.Errorf("bad lang: want 400, got %d", res.StatusCode)
+		}
+		res.Body.Close()
+	})
+
+	t.Run("index.html injects saved lang", func(t *testing.T) {
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"lang":"zh"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
+		res.Body.Close()
+
+		res, _ = http.Get("http://" + srv.Addr() + "/")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if !bytes.Contains(body, []byte(`window.__initialLang="zh"`)) {
+			t.Errorf("index.html missing lang injection; head was:\n%s",
+				body[:min(len(body), 600)])
+		}
+	})
+
+	t.Run("index.html falls back to en lang when no prefs", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := http.Get("http://" + srv.Addr() + "/")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if !bytes.Contains(body, []byte(`window.__initialLang="en"`)) {
+			t.Errorf("default lang inject missing:\n%s", body[:min(len(body), 600)])
+		}
+	})
 }
 
 func min(a, b int) int { if a < b { return a }; return b }

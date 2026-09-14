@@ -263,8 +263,12 @@ const dict = {
   },
 };
 
-let lang0 = (localStorage.getItem('2fa.lang')
-  || (/^zh/i.test(navigator.language) ? 'zh' : 'en'));
+// Language is resolved in the inline <script> in index.html (so the very
+// first paint is already in the right language, with no EN→ZH flicker).
+// By the time this file runs, <html data-lang> already holds the chosen
+// value — read it from there instead of trusting localStorage, which the
+// GUI's webview wipes between launches.
+let lang0 = document.documentElement.dataset.lang || 'en';
 
 function t(key, vars) {
   let s = dict[lang0]?.[key] ?? dict.en[key] ?? key;
@@ -462,6 +466,10 @@ function openModeDialog() {
   $('#mode-pw').value = '';
   $('#mode-pw2').value = '';
   $('#mode-confirm').checked = false;
+  // Gate the submit button on the destructive confirmation checkbox.
+  // The server still re-checks, but the disabled state stops an
+  // accidental click from triggering a destructive rekey.
+  $('#mode-go').disabled = true;
   // Reset show-password toggle and restore masked inputs each open.
   const showPw = $('#mode-show');
   if (showPw) {
@@ -1562,7 +1570,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const next = b.dataset.lang;
       if (next === lang0) return;
       lang0 = next;
-      localStorage.setItem('2fa.lang', lang0);
+      // Mirror the theme flow: localStorage is a write-through cache for
+      // snappy reloads within the same webview session, the server PUT is
+      // the durable copy that survives `2fa gui` restarts.
+      try { localStorage.setItem('2fa.lang', lang0); } catch (_) {}
+      fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: themeRoot.getAttribute('data-theme'), lang: lang0 }) })
+        .catch(() => { /* network blip: next load retries from server */ });
       applyI18n();
       // Re-render dynamic content so any cached text refreshes.
       // renderStatus also rewrites #mode-btn-label (Set/Disable password)
@@ -1605,6 +1619,12 @@ document.addEventListener('DOMContentLoaded', () => {
       $('#mode-pw2').type = t;
     });
   }
+  // Submit button stays disabled until the user explicitly confirms.
+  // Same gate for both directions (set / disable) — the rekey is
+  // irreversible either way.
+  $('#mode-confirm').addEventListener('change', (e) => {
+    $('#mode-go').disabled = !e.target.checked;
+  });
   // Defensive: keep #lock-btn hidden. The HTML has `hidden` set, but CSS
   // (.btn = inline-flex) and stale embedded assets in older builds can
   // surface it. There is no server-side lock endpoint to invoke.
