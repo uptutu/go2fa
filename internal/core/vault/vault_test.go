@@ -213,3 +213,17 @@ func TestSetPasswordPreservesGroups(t *testing.T) {
 		}
 	}
 }
+
+// TestSetPasswordRejectsBlank: defense-in-depth against a password that
+// is purely whitespace. The web layer already enforces this, but
+// SetPassword is a public API and any future caller must get the same
+// guarantee.
+func TestSetPasswordRejectsBlank(t *testing.T) {
+	v := newTestVault(t, ModeNoPassword, "")
+	ctx := context.Background()
+	for _, pw := range []string{"", "        ", "\t\n  \t"} {
+		if err := v.SetPassword(ctx, pw); err == nil {
+			t.Errorf("SetPassword(%q) should fail", pw)
+		}
+	}
+}

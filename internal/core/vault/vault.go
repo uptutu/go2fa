@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/uptutu/go2fa/internal/core/crypto"
@@ -195,8 +196,14 @@ func (v *Vault) SetPassword(ctx context.Context, newPassword string) error {
 	if !v.IsUnlocked() {
 		return ErrLocked
 	}
+	// Last-line defense against pure-whitespace input. The web layer
+	// already enforces this, but SetPassword is also called from any
+	// future non-web entry point and from tests; reject here too.
 	if newPassword == "" {
 		return errors.New("vault: password cannot be empty")
+	}
+	if strings.TrimSpace(newPassword) == "" {
+		return errors.New("vault: password cannot be blank")
 	}
 	if err := v.reInitWith(ctx, ModePassword, newPassword); err != nil {
 		return err

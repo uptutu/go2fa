@@ -126,7 +126,9 @@ const dict = {
     mode_pw_label: 'New password (8+ characters)',
     mode_pw2_label: 'Confirm password',
     mode_pw_mismatch: 'Passwords do not match',
-    mode_pw_short: 'Password must be at least 8 characters',
+    mode_pw_short: 'Password must be at least 8 characters and not blank',
+    mode_pw_whitespace: 'Password cannot be only whitespace',
+    mode_confirm_required: 'Please check the confirmation box to continue',
     mode_confirm_disable: 'I understand anyone with disk access on this machine can decrypt the vault',
     mode_confirm_set: 'I will remember this password — there is no way to recover it',
     mode_going: 'Switching…',
@@ -249,7 +251,9 @@ const dict = {
     mode_pw_label: '新密码(至少 8 位)',
     mode_pw2_label: '确认密码',
     mode_pw_mismatch: '两次密码不一致',
-    mode_pw_short: '密码至少需要 8 位',
+    mode_pw_short: '密码至少 8 位且不能全是空格',
+    mode_pw_whitespace: '密码不能全是空白字符',
+    mode_confirm_required: '请先勾选确认框再继续',
     mode_confirm_disable: '我理解:任何可访问本机磁盘的人都能解密金库',
     mode_confirm_set: '我会记牢这个密码——无法找回',
     mode_going: '切换中…',
@@ -468,14 +472,22 @@ async function submitModeSwitch() {
   const errEl = $('#mode-err');
   errEl.textContent = '';
   if (!$('#mode-confirm').checked) {
-    errEl.textContent = t('mode_confirm_' + (target === 'password' ? 'set' : 'disable'));
+    errEl.textContent = t('mode_confirm_required');
     return;
   }
   let password = '';
   if (target === 'password') {
     const pw = $('#mode-pw').value;
     const pw2 = $('#mode-pw2').value;
-    if (pw.length < 8) { errEl.textContent = t('mode_pw_short'); return; }
+    // Whitespace check: pure-whitespace passes len() < 8 in some cases
+    // ("        " is 8 chars) but produces a KEK with no real entropy.
+    // Mirror the server's rule so we never let one reach the wire.
+    if (pw.trim() === '' || pw.length < 8) {
+      errEl.textContent = pw.trim() === '' && pw.length >= 8
+        ? t('mode_pw_whitespace')
+        : t('mode_pw_short');
+      return;
+    }
     if (pw !== pw2) { errEl.textContent = t('mode_pw_mismatch'); return; }
     password = pw;
   }
@@ -484,13 +496,28 @@ async function submitModeSwitch() {
   const prev = go.textContent;
   go.textContent = t('mode_going');
   try {
-    const body = JSON.stringify({ mode: target, password });
+    // Send both fields: the server enforces confirm == password on the
+    // wire so a buggy/hostile client can't rekey the vault with a value
+    // the user never saw confirmed.
+    const body = JSON.stringify({ mode: target, password, confirm: password });
     const headers = { 'Content-Type': 'application/json' };
     if (authToken) headers['X-Auth-Token'] = authToken;
     const res = await fetch('/api/mode', { method: 'POST', headers, body });
     if (!res.ok) {
+      // Structured error: try JSON first (i18n code + English fallback),
+      // then plain text. JSON keeps the error in the active language
+      // even when the request comes from a non-UI client.
       let msg = '';
-      try { msg = (await res.text()) || ''; } catch (_) { /* ignore */ }
+      try {
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const data = await res.json();
+          if (data && data.code) msg = t(data.code) || data.message || '';
+          if (!msg && data && data.message) msg = data.message;
+        } else {
+          msg = (await res.text()) || '';
+        }
+      } catch (_) { /* ignore */ }
       errEl.textContent = msg || `HTTP ${res.status}`;
       return;
     }

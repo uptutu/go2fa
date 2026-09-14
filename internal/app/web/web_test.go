@@ -586,7 +586,7 @@ func TestAPIModeSwitch(t *testing.T) {
 		http.Post("http://"+srv.Addr()+"/api/secrets", "application/json",
 			bytes.NewBufferString(`{"uri":"`+uri+`"}`))
 
-		res, body := post(t, srv, `{"mode":"password","password":"newmasterpass"}`)
+		res, body := post(t, srv, `{"mode":"password","password":"newmasterpass","confirm":"newmasterpass"}`)
 		if res.StatusCode != 200 {
 			t.Fatalf("switch: %d %s", res.StatusCode, body)
 		}
@@ -679,9 +679,39 @@ func TestAPIModeSwitch(t *testing.T) {
 
 	t.Run("password too short", func(t *testing.T) {
 		srv := newTestServer(t)
-		res, _ := post(t, srv, `{"mode":"password","password":"short"}`)
+		res, _ := post(t, srv, `{"mode":"password","password":"short","confirm":"short"}`)
 		if res.StatusCode != 400 {
 			t.Errorf("short pw: want 400, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("whitespace-only password rejected", func(t *testing.T) {
+		// 8 spaces pass len() < 8 but produce a KEK with no entropy.
+		// Server must reject on TrimSpace=="" before Argon2id runs.
+		srv := newTestServer(t)
+		res, _ := post(t, srv, `{"mode":"password","password":"        ","confirm":"        "}`)
+		if res.StatusCode != 400 {
+			t.Errorf("whitespace pw: want 400, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("password / confirm mismatch rejected", func(t *testing.T) {
+		// Bug fix: server must not accept a payload where the two
+		// password fields disagree, even if each individually passes
+		// the length check. Otherwise a buggy UI could rekey the
+		// vault with a value the user never confirmed.
+		srv := newTestServer(t)
+		res, _ := post(t, srv, `{"mode":"password","password":"newmasterpass","confirm":"DIFFERENT"}`)
+		if res.StatusCode != 400 {
+			t.Errorf("mismatch: want 400, got %d", res.StatusCode)
+		}
+		// And no mode flip happened.
+		res2, _ := http.Get("http://" + srv.Addr() + "/api/status")
+		var st map[string]any
+		json.NewDecoder(res2.Body).Decode(&st)
+		res2.Body.Close()
+		if st["mode"] != "no-password" {
+			t.Errorf("mode flipped after rejected payload: %v", st["mode"])
 		}
 	})
 
@@ -696,7 +726,7 @@ func TestAPIModeSwitch(t *testing.T) {
 	t.Run("locked vault rejected", func(t *testing.T) {
 		srv := newTestServer(t)
 		srv.v.Lock()
-		res, _ := post(t, srv, `{"mode":"password","password":"newmasterpass"}`)
+		res, _ := post(t, srv, `{"mode":"password","password":"newmasterpass","confirm":"newmasterpass"}`)
 		if res.StatusCode != 401 {
 			t.Errorf("locked: want 401, got %d", res.StatusCode)
 		}
@@ -725,7 +755,7 @@ func TestAPIModeSwitch(t *testing.T) {
 			bytes.NewBufferString(`{"name":"Work"}`))
 
 		// no-password → password → no-password.
-		post(t, srv, `{"mode":"password","password":"newmasterpass"}`)
+		post(t, srv, `{"mode":"password","password":"newmasterpass","confirm":"newmasterpass"}`)
 		post(t, srv, `{"mode":"no-password"}`)
 
 		res, _ := http.Get("http://" + srv.Addr() + "/api/secrets")

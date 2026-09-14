@@ -223,6 +223,26 @@ func (s *Server) writeErr(w http.ResponseWriter, code int, msg string) {
 	http.Error(w, msg, code)
 }
 
+// apiError is the structured error body returned by writeAPIError. The
+// `code` field is an i18n key (matching the `dict` keys in app.js) so
+// non-English clients can translate the message client-side; `message`
+// is the English fallback for clients that don't know the code.
+//
+// Endpoints that need bilingual error rendering should use this helper
+// instead of writeErr / http.Error. The Content-Type stays JSON so the
+// frontend can distinguish by content-type sniffing.
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func (s *Server) writeAPIError(w http.ResponseWriter, code int, i18nKey, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(apiError{Code: i18nKey, Message: msg})
+}
+
 // internalErr logs the underlying error and returns a generic 500 to the
 // caller. Use this for server-side failures (decryption, DB, crypto) so
 // internal state and file paths do not leak through HTTP responses.
@@ -747,6 +767,13 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 // claim: Argon2id derives the KEK regardless, but anything shorter is
 // essentially "no password" anyway and gets in the way of clear warning
 // copy in the UI ("set a password" should mean something).
+//
+// Validation runs server-side too, not just in the UI: the API must
+// reject a pure-whitespace password (otherwise "        " would pass
+// the byte-length check and produce a KEK with no real entropy), and
+// the two password fields must match on the wire (otherwise a buggy or
+// hostile client could rekey the vault with a value the user never saw
+// in the confirmation box).
 func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	if !s.gate(r, w) {
 		return
@@ -762,6 +789,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Mode     string `json:"mode"`
 		Password string `json:"password"`
+		Confirm  string `json:"confirm"`
 	}
 	readBounded(r, w, 16*1024)
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -771,8 +799,17 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	switch in.Mode {
 	case "password":
-		if len(in.Password) < 8 {
-			s.writeErr(w, http.StatusBadRequest, "password must be at least 8 characters")
+		// TrimSpace: reject pure-whitespace input. Trim then check length
+		// would lose legit "  password  " typing, so check TrimSpace
+		// being empty OR raw length < 8.
+		if strings.TrimSpace(in.Password) == "" || len(in.Password) < 8 {
+			s.writeAPIError(w, http.StatusBadRequest, "mode_pw_short",
+				"password must be at least 8 characters and not blank")
+			return
+		}
+		if in.Password != in.Confirm {
+			s.writeAPIError(w, http.StatusBadRequest, "mode_pw_mismatch",
+				"passwords do not match")
 			return
 		}
 		if err := s.v.SetPassword(ctx, in.Password); err != nil {
@@ -785,7 +822,8 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		s.writeErr(w, http.StatusBadRequest, "mode must be 'password' or 'no-password'")
+		s.writeAPIError(w, http.StatusBadRequest, "mode_invalid",
+			"mode must be 'password' or 'no-password'")
 		return
 	}
 	m, _ := s.v.LoadMeta(ctx)
