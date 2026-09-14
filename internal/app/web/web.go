@@ -3,6 +3,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -12,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -37,6 +40,7 @@ type Server struct {
 	listener     net.Listener
 	token        string       // required for non-loopback binds
 	lastActivity atomic.Int64 // unix seconds of the last gated request
+	prefs        prefStore    // UI prefs (theme) persisted next to the vault
 }
 
 // idleLockAfter locks the vault when the API has seen no request for this
@@ -45,7 +49,25 @@ const idleLockAfter = 15 * time.Minute
 
 // New constructs a server bound to addr.
 func New(addr string, v *vault.Vault, token string) (*Server, error) {
-	s := &Server{v: v, addr: addr, token: token, mux: http.NewServeMux()}
+	// Sidecar files (preferences.json) live next to vault.sqlite so a
+	// "wipe the vault" operation naturally cleans them up too. Falling
+	// back to vault.DefaultDir keeps the API usable even when v was
+	// constructed via Open without a separate vault directory.
+	dir := v.Dir()
+	if dir == "" {
+		var err error
+		dir, err = vault.DefaultDir()
+		if err != nil {
+			return nil, err
+		}
+	}
+	s := &Server{
+		v:        v,
+		addr:     addr,
+		token:    token,
+		mux:      http.NewServeMux(),
+		prefs:    prefStore{path: filepath.Join(dir, preferencesFile)},
+	}
 	s.lastActivity.Store(time.Now().Unix())
 	s.routes()
 	return s, nil
@@ -108,7 +130,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/parse-otpauth", s.handleParseOtpauth)
 	s.mux.HandleFunc("/api/export", s.handleExport)
 	s.mux.HandleFunc("/api/mode", s.handleMode)
-	s.mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	s.mux.HandleFunc("/api/preferences", s.handlePreferences)
+	// Catch-all: intercept index.html to inject the saved theme so first
+	// paint is correct (no FOUC, no flash of default theme). Everything
+	// else falls through to the static file server.
+	s.mux.HandleFunc("/", s.serveRoot)
 }
 
 // authOK enforces the auth-token policy:
@@ -768,6 +794,86 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		out = "no-password"
 	}
 	s.writeJSON(w, map[string]any{"ok": true, "mode": out})
+}
+
+// handlePreferences is the server-authoritative UI prefs store. Theme
+// lives here (not just localStorage) so the choice survives across
+// `2fa gui` launches — the underlying webview gets no persistent
+// localStorage without a configured user-data-dir that glaze does not set.
+// Non-loopback binds still pass through auth + origin checks via gate().
+func (s *Server) handlePreferences(w http.ResponseWriter, r *http.Request) {
+	if !s.gate(r, w) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		prefs, err := s.prefs.load()
+		if err != nil {
+			s.internalErr(w, r, err)
+			return
+		}
+		s.writeJSON(w, prefs)
+	case http.MethodPut:
+		readBounded(r, w, 4*1024)
+		var in Preferences
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			s.decodeErr(w, err)
+			return
+		}
+		// Whitelist theme values: keep the API from accepting arbitrary
+		// strings that the client then injects into a style attribute.
+		switch in.Theme {
+		case "aurora", "obsidian", "dusk", "paper", "ember", "mono":
+		default:
+			s.writeErr(w, http.StatusBadRequest, "unknown theme")
+			return
+		}
+		if err := s.prefs.save(in); err != nil {
+			s.internalErr(w, r, err)
+			return
+		}
+		s.writeJSON(w, in)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// serveRoot handles the catch-all: serves the embedded static assets, but
+// intercepts index.html to inject the saved theme. The injected script
+// runs BEFORE first paint, so the user sees the correct theme even on
+// the very first frame — no aurora→obsidian flash.
+func (s *Server) serveRoot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		s.serveIndex(w, r)
+		return
+	}
+	http.FileServer(http.FS(staticFS)).ServeHTTP(w, r)
+}
+
+func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
+	body, err := fs.ReadFile(staticFS, "index.html")
+	if err != nil {
+		s.internalErr(w, r, err)
+		return
+	}
+	prefs, err := s.prefs.load()
+	if err != nil {
+		// Non-fatal: if prefs fail to load, serve default theme rather
+		// than breaking the whole UI. Log so it's not silently lost.
+		log.Printf("web: load prefs: %v", err)
+		prefs.Theme = "aurora"
+	}
+	// Inject before the existing theme-detection script. The inline
+	// script in index.html reads window.__initialTheme first.
+	inject := fmt.Sprintf(`<script>window.__initialTheme=%q;</script>`, prefs.Theme)
+	body = bytes.Replace(body, []byte("<script>"), []byte(inject+"<script>"), 1)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(body)
 }
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {

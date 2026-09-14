@@ -745,3 +745,125 @@ func TestAPIModeSwitch(t *testing.T) {
 		}
 	})
 }
+
+// TestAPIPreferences covers GET/PUT /api/preferences: default theme,
+// persistence across reads, validation, and the index.html injection that
+// is the whole reason this endpoint exists (the GUI's webview has no
+// stable localStorage across launches).
+func TestAPIPreferences(t *testing.T) {
+	t.Run("default theme when no file", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := http.Get("http://" + srv.Addr() + "/api/preferences")
+		if res.StatusCode != 200 {
+			t.Fatalf("status: %d", res.StatusCode)
+		}
+		var prefs struct{ Theme string }
+		json.NewDecoder(res.Body).Decode(&prefs)
+		res.Body.Close()
+		if prefs.Theme != "aurora" {
+			t.Errorf("default theme: %q", prefs.Theme)
+		}
+	})
+
+	t.Run("put then get round-trip", func(t *testing.T) {
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"theme":"obsidian"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != 200 {
+			b, _ := io.ReadAll(res.Body)
+			t.Fatalf("PUT: %d %s", res.StatusCode, b)
+		}
+		res.Body.Close()
+
+		res, _ = http.Get("http://" + srv.Addr() + "/api/preferences")
+		var prefs struct{ Theme string }
+		json.NewDecoder(res.Body).Decode(&prefs)
+		res.Body.Close()
+		if prefs.Theme != "obsidian" {
+			t.Errorf("after PUT: %q", prefs.Theme)
+		}
+	})
+
+	t.Run("persists across new server", func(t *testing.T) {
+		// First server: write a theme.
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"theme":"dusk"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
+		res.Body.Close()
+
+		// Restart: a fresh server in the SAME dir reads back what we wrote.
+		// Pull the prefs path off the first server and open a second one
+		// pointing at the same vault dir.
+		dir := srv.v.Dir()
+		srv.Stop()
+		srv.v.Close()
+
+		st, err := vault.OpenStore(context.Background(), filepath.Join(dir, "vault.sqlite"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := vault.NewForTesting(st, dir)
+		srv2, _ := New("127.0.0.1:0", v, "")
+		if _, err := srv2.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		defer srv2.Stop()
+		defer v.Close()
+
+		res, _ = http.Get("http://" + srv2.Addr() + "/api/preferences")
+		var prefs struct{ Theme string }
+		json.NewDecoder(res.Body).Decode(&prefs)
+		res.Body.Close()
+		if prefs.Theme != "dusk" {
+			t.Errorf("after restart: %q (want dusk)", prefs.Theme)
+		}
+	})
+
+	t.Run("unknown theme rejected", func(t *testing.T) {
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"theme":"<script>alert(1)</script>"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
+		if res.StatusCode != 400 {
+			t.Errorf("bad theme: want 400, got %d", res.StatusCode)
+		}
+		res.Body.Close()
+	})
+
+	t.Run("index.html injects saved theme", func(t *testing.T) {
+		srv := newTestServer(t)
+		req, _ := http.NewRequest("PUT", "http://"+srv.Addr()+"/api/preferences",
+			bytes.NewBufferString(`{"theme":"ember"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, _ := http.DefaultClient.Do(req)
+		res.Body.Close()
+
+		res, _ = http.Get("http://" + srv.Addr() + "/")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if !bytes.Contains(body, []byte(`window.__initialTheme="ember"`)) {
+			t.Errorf("index.html missing theme injection; head was:\n%s",
+				body[:min(len(body), 600)])
+		}
+	})
+
+	t.Run("index.html falls back to aurora when no prefs", func(t *testing.T) {
+		srv := newTestServer(t)
+		res, _ := http.Get("http://" + srv.Addr() + "/")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if !bytes.Contains(body, []byte(`window.__initialTheme="aurora"`)) {
+			t.Errorf("default inject missing:\n%s", body[:min(len(body), 600)])
+		}
+	})
+}
+
+func min(a, b int) int { if a < b { return a }; return b }

@@ -428,6 +428,21 @@ async function ensureUnlocked() {
  */
 const modeScrim = $('#mode-dialog');
 
+// Pure label-setter for the open mode dialog. Called on every language
+// switch so the title / body / labels / confirm-button text track the
+// active language in real time. Reads the target mode off
+// modeScrim.dataset.targetMode (set at open time) and never touches
+// inputs or the confirm checkbox — preserves whatever the user typed.
+function setModeDialogLabels() {
+  const wantPassword = modeScrim.dataset.targetMode === 'password';
+  $('#mode-title').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
+  $('#mode-body').textContent = wantPassword ? t('mode_set_body') : t('mode_disable_body');
+  $('#mode-pw-label').textContent = t('mode_pw_label');
+  $('#mode-pw2-label').textContent = t('mode_pw2_label');
+  $('#mode-confirm-label').textContent = wantPassword ? t('mode_confirm_set') : t('mode_confirm_disable');
+  $('#mode-go').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
+}
+
 function openModeDialog() {
   if (!state.status || !state.status.unlocked) {
     // Defence in depth: button is only shown when unlocked, but if the
@@ -436,18 +451,13 @@ function openModeDialog() {
     return;
   }
   const wantPassword = state.status.mode !== 'password';
-  $('#mode-title').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
-  $('#mode-body').textContent = wantPassword ? t('mode_set_body') : t('mode_disable_body');
+  modeScrim.dataset.targetMode = wantPassword ? 'password' : 'no-password';
   $('#mode-pw-fields').hidden = !wantPassword;
-  $('#mode-pw-label').textContent = t('mode_pw_label');
-  $('#mode-pw2-label').textContent = t('mode_pw2_label');
   $('#mode-pw').value = '';
   $('#mode-pw2').value = '';
-  $('#mode-confirm-label').textContent = wantPassword ? t('mode_confirm_set') : t('mode_confirm_disable');
   $('#mode-confirm').checked = false;
   $('#mode-err').textContent = '';
-  $('#mode-go').textContent = wantPassword ? t('mode_set_title') : t('mode_disable_title');
-  modeScrim.dataset.targetMode = wantPassword ? 'password' : 'no-password';
+  setModeDialogLabels();
   showScrim(modeScrim);
   // Focus the first relevant field so Enter / Tab flow sensibly.
   setTimeout(() => (wantPassword ? $('#mode-pw') : $('#mode-confirm')).focus(), 50);
@@ -591,8 +601,14 @@ function scoreSecret(q, s) {
 /* -------- Theme picker --------
  * Token-driven: picking a theme just rewrites data-theme on <html>; all
  * component styles read from CSS variables, so nothing else changes.
- * The <head> inline script already set data-theme before first paint, so
- * here we only sync UI state (button label, pressed card).
+ *
+ * Persistence is server-side (PUT /api/preferences) because the GUI's
+ * webview process gets no stable localStorage across `2fa gui` launches
+ * — glaze doesn't configure a user-data-dir. localStorage still caches
+ * the value for instant read-back and survives across page reloads in
+ * the same webview session; the server is the source of truth.
+ * The server also injects the saved theme into index.html before first
+ * paint, so there is no aurora→obsidian flash on startup.
  */
 const THEMES = ['aurora', 'obsidian', 'dusk', 'paper', 'ember', 'mono'];
 const THEME_LABELS = {
@@ -608,7 +624,11 @@ function applyTheme(id, { persist = true } = {}) {
   if (!THEMES.includes(id)) id = 'aurora';
   themeRoot.setAttribute('data-theme', id);
   if (persist) {
+    // localStorage is a write-through cache for snappy reloads within
+    // the same webview session; the server PUT is the durable copy.
     try { localStorage.setItem('go2fa.theme', id); } catch (_) { /* private mode */ }
+    fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: id }) }).catch(() => { /* network blip: next load retries */ });
   }
   if (themeCurrent) themeCurrent.textContent = THEME_LABELS[id];
   $$('.theme-card').forEach((c) =>
@@ -864,6 +884,27 @@ function updateRow(li, s) {
 function fillDetail(li, s) {
   const det = $('.detail', li);
   if (!det) return;
+
+  // Detail-panel labels and action buttons are baked into the row
+  // template by createRow. renderSecrets is diff-based, so on a
+  // language switch existing rows would otherwise keep the labels in
+  // the old language. Re-apply translations on every fill — cheap,
+  // and keeps detail-panel text in sync with the row data after a
+  // language change.
+  const accLabel = $('.detail-field-account .label', det);
+  if (accLabel) accLabel.textContent = t('detail_account');
+  const metaLabels = $$('.meta-row > div .label', det);
+  if (metaLabels[0]) metaLabels[0].textContent = t('detail_algo');
+  if (metaLabels[1]) metaLabels[1].textContent = t('detail_digits');
+  if (metaLabels[2]) metaLabels[2].textContent = t('detail_period');
+  const notesLabel = $('.detail-field-notes .label', det);
+  if (notesLabel) notesLabel.textContent = t('detail_notes');
+  const dCopy = $('.d-copy', det);
+  if (dCopy) dCopy.textContent = t('copy');
+  const dQr = $('.d-qr', det);
+  if (dQr) dQr.textContent = t('qr_show');
+  const dRefresh = $('.d-refresh', det);
+  if (dRefresh) dRefresh.textContent = t('refresh_now');
 
   const q = state.filter.q.trim();
   const mAccount = q ? fuzzyMatch(q, s.account || '') : null;
@@ -1488,9 +1529,16 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('2fa.lang', lang0);
       applyI18n();
       // Re-render dynamic content so any cached text refreshes.
+      // renderStatus also rewrites #mode-btn-label (Set/Disable password)
+      // which is mode-dependent — not picked up by data-i18n scanning.
+      renderStatus();
       renderGroups();
       renderGroupSelects();
       renderSecrets();
+      // If the Set Password dialog is open, re-translate its title / body /
+      // labels / confirm-button. Inputs and the confirm checkbox stay as the
+      // user left them.
+      if (!modeScrim.hidden) setModeDialogLabels();
     });
   });
 

@@ -7,8 +7,15 @@
 <title>2fa — TOTP Vault</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script>
+  // Theme resolution order (first match wins):
+  //   1. window.__initialTheme — server-injected from /api/preferences,
+  //      so the very first paint is correct even on a fresh webview.
+  //   2. localStorage — write-through cache for snappy reloads within
+  //      the same webview session; can lag the server after the user
+  //      changes theme in another tab / window.
+  //   3. 'aurora' — final fallback.
   try {
-    var t = localStorage.getItem('go2fa.theme') || 'aurora';
+    var t = window.__initialTheme || localStorage.getItem('go2fa.theme') || 'aurora';
     document.documentElement.setAttribute('data-theme', t);
   } catch (_) {}
 </script>
@@ -829,7 +836,7 @@
     user-select: all;
     min-width: 128px;
     text-align: center;
-    transition: border-color .2s, box-shadow .2s, background .2s, color .2s, transform .15s;
+    transition: border-color .2s, box-shadow .2s, background .2s, color .2s, transform .15s, opacity .25s cubic-bezier(.2,.8,.2,1);
     text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   @media (prefers-color-scheme: light) {
@@ -1124,6 +1131,16 @@
       0 4px 14px -8px color-mix(in srgb, var(--accent) 18%, transparent);
   }
   .secret.expanded .pick { opacity: 1; }
+  /* When the row is expanded the detail panel below shows the same
+     code in the big version. Fade the row's small code out so the
+     user reads the detail panel only — the eye reads the cross-fade
+     as "code moved into the detail view". pointer-events: none stops
+     the invisible button from intercepting clicks. */
+  .secret.expanded .code {
+    opacity: 0;
+    transform: scale(0.85);
+    pointer-events: none;
+  }
 
   /* Detail region: grid-rows 0fr→1fr animates without layout jitter */
   .secret .detail {

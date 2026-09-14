@@ -45,6 +45,11 @@ type Vault struct {
 	dir string
 }
 
+// Dir returns the directory holding the vault's SQLite file (and any
+// sidecar files like preferences.json). Exposed so out-of-package code
+// can colocate its own state with the vault.
+func (v *Vault) Dir() string { return v.dir }
+
 // Open opens the default vault database under ~/.2fa/vault.sqlite. If the
 // file is brand-new, returns a Vault in a "blank" state — caller must
 // call Init or UnlockWithPassword/UnlockMachineKey. Existing metadata is
