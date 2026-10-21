@@ -1069,8 +1069,6 @@ async function createGroup() {
 const secretsUl = $('#secrets');
 const emptyEl = $('#empty');
 
-const RING_LEN = 2 * Math.PI * 16;
-
 function codeFmt(s) {
   const digits = String(s.digits || 6);
   return digits === s.code.length ? s.code : (s.code + ' '.repeat(digits)).slice(0, digits);
@@ -1083,11 +1081,8 @@ function updateRowCountdown(li, s) {
   li.classList.toggle('expiring', s.remaining > 0 && s.remaining <= 5);
   const num = $('.num', li);
   if (num && num.textContent !== String(s.remaining)) num.textContent = String(s.remaining);
-  const prog = $('.progress', li);
-  if (prog) {
-    prog.setAttribute('stroke-dashoffset',
-      (RING_LEN * (1 - Math.max(0, s.remaining) / s.period)).toFixed(2));
-  }
+  const arc = $('.arc', li);
+  if (arc) arc.style.setProperty('--p', String(100 * Math.max(0, s.remaining) / s.period));
   // Keep the expanded detail panel's timer in the same tick — no separate timer.
   const detSec = li.querySelector('.detail .sec');
   if (detSec && detSec.textContent !== String(s.remaining)) detSec.textContent = String(s.remaining);
@@ -1214,12 +1209,7 @@ function createRow(s) {
         <input type="checkbox" class="pick-cb" ${checked} aria-label="${escapeHtml(s.issuer)}">
       </label>
       <div class="ring" aria-hidden="true">
-        <svg viewBox="0 0 40 40">
-          <circle class="track" cx="20" cy="20" r="16"/>
-          <circle class="progress" cx="20" cy="20" r="16"
-                  stroke-dasharray="${RING_LEN.toFixed(2)}"
-                  stroke-dashoffset="${(RING_LEN * (1 - Math.max(0, s.remaining) / s.period)).toFixed(2)}"/>
-        </svg>
+        <span class="arc" style="--p:${(100 * Math.max(0, s.remaining) / s.period).toFixed(1)}"></span>
         <span class="num">${Math.max(0, s.remaining)}</span>
       </div>
       <div class="who">

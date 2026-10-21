@@ -337,30 +337,33 @@
     background-size: 3px 3px;
     pointer-events: none; mix-blend-mode: overlay;
   }
+  /*
+   * Ambient blobs are deliberately static. They used to drift with an
+   * infinite `animation: drift…` on top of a blur(90px); because every
+   * glass surface above uses backdrop-filter, each frame of that motion
+   * forced a full-page re-blur — 60fps → 16fps in Chromium, and a pegged
+   * WebKitGTK core in the `2fa gui` window, which then felt frozen and
+   * stopped responding to clicks. Static blobs rasterise once and idle at 0%.
+   * Don't re-add motion here without measuring the webview's idle CPU.
+   */
   .blob {
     position: absolute;
     border-radius: 50%;
-    filter: blur(90px);
     opacity: 0.55;
-    will-change: transform;
+    filter: blur(90px);
   }
   .b1 {
     width: 540px; height: 540px; left: -130px; top: -150px;
     background: radial-gradient(circle, rgba(29,220,143,0.35), transparent 70%);
-    animation: drift1 38s ease-in-out infinite alternate;
   }
   .b2 {
     width: 480px; height: 480px; right: -110px; top: 18%;
     background: radial-gradient(circle, rgba(77,217,255,0.28), transparent 70%);
-    animation: drift2 46s ease-in-out infinite alternate;
   }
   .b3 {
     width: 440px; height: 440px; left: 32%; bottom: -180px;
     background: radial-gradient(circle, rgba(167,139,250,0.22), transparent 70%);
-    animation: drift1 52s ease-in-out infinite alternate-reverse;
   }
-  @keyframes drift1 { to { transform: translate(130px, 70px) scale(1.15); } }
-  @keyframes drift2 { to { transform: translate(-150px, 90px) scale(0.88); } }
 
   /* -------- Glass recipe (the liquid glass base) -------- */
   /*
@@ -383,10 +386,18 @@
     position: relative;
     isolation: isolate; /* keep pseudo layers inside the rounded clip */
   }
+  /*
+   * Backdrop blur is applied to chrome that is painted once and then sits
+   * still (header, chips, dialogs, toasts). It is deliberately NOT applied to
+   * `.secret` rows: the countdown repaints each row once a second, and in
+   * WebKitGTK every repaint inside a backdrop-filter surface re-samples the
+   * backdrop — measured at ~20% of a CPU core per row, i.e. a pegged core and
+   * an unclickable window with six entries. Rows keep the tint + border +
+   * sheen instead; over the soft ambient background the blur is invisible.
+   */
   .glass,
   .chip,
   .btn,
-  .secret,
   .dialog,
   .toast,
   .search,
@@ -747,24 +758,17 @@
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
-    /* Hoist each row into its own compositor layer so the continuously
-       animated background blobs (`.b1/.b2/.b3`, blur 90, infinite drift)
-       don't force a per-frame backdrop-filter resample of the whole list —
-       that was the cause of hover dying every tick. */
+    /* No backdrop-filter here (see the note on the glass group above) — the
+       row repaints every second for the countdown, and a backdrop blur would
+       re-sample the page behind it on each tick. */
     transform: translateZ(0);
-    will-change: transform;
     background: var(--glass);
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--topline);
     transition: transform .25s cubic-bezier(.2,.8,.2,1), border-color .2s, background .2s, box-shadow .25s;
   }
   .secret:hover {
-    /* Keep the translateZ(0) layer promotion; without it the row drops its
-       compositor layer for the duration of the hover and starts paying the
-       per-frame backdrop-filter cost again — visible as hover stutter. */
     transform: translateZ(0) translateY(-2px);
     border-color: var(--border-strong);
     background: var(--glass-2);
@@ -780,16 +784,23 @@
   }
 
   .ring { position: relative; width: 40px; height: 40px; }
-  .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-  .ring circle { fill: none; stroke-width: 4; }
-  .ring .track { stroke: var(--glass-2); }
-  .ring .progress {
-    stroke: var(--accent);
-    stroke-linecap: round;
-    transition: stroke-dashoffset 1s linear, stroke .3s;
+  /*
+   * Countdown arc as a masked conic gradient, not an SVG stroke.
+   * WebKitGTK escalates a per-second `stroke-dashoffset` write to a repaint of
+   * the whole page; with any backdrop-filter on that page it then re-blurs
+   * everything — measured at ~20% of a CPU core per tick, i.e. a pegged core
+   * and an unclickable window. A custom-property update on this div stays
+   * inside the row (measured 2%). Don't move this back to SVG.
+   */
+  .ring .arc {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(var(--ring-color, var(--accent)) calc(var(--p, 100) * 1%), var(--glass-2) 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent 80%, #000 81%);
+    mask: radial-gradient(farthest-side, transparent 80%, #000 81%);
   }
-  .secret.expiring .ring .progress { stroke: var(--warn); }
-  .secret.expired .ring .progress { stroke: var(--danger); }
+  .secret.expiring .ring .arc { --ring-color: var(--warn); }
+  .secret.expired .ring .arc { --ring-color: var(--danger); }
   .ring .num {
     position: absolute; inset: 0;
     display: grid; place-items: center;
@@ -1370,8 +1381,6 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
-    .ring .progress { transition: none; }
-    .blob { animation: none; }
   }
 </style>
 </head>
