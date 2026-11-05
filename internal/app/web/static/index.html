@@ -1643,12 +1643,17 @@
       </button>
     </header>
     <div class="body">
-      <p data-i18n="import_body" style="margin:0;color:var(--text-dim)">Pick a .2fa / Aegis / otpauth:// file. Format is detected automatically — a password is asked only if the file is encrypted.</p>
+      <p data-i18n="import_body" style="margin:0;color:var(--text-dim)">Pick a .2fa / Aegis / otpauth:// file, or paste an otpauth:// URI. Format is detected automatically — a password is asked only if the file is encrypted.</p>
       <div class="field">
         <label for="import-file" data-i18n="import_file">File</label>
         <input id="import-file" type="file" accept=".2fa,.json,.txt,application/json,text/plain,application/octet-stream">
         <span class="help" data-i18n="import_file_help">Supported: .2fa (encrypted), Aegis JSON (plaintext or encrypted), otpauth:// URI list.</span>
         <span id="import-detected" class="help" hidden></span></span>
+      </div>
+      <div class="field">
+        <label for="import-text" data-i18n="import_text">Or paste text</label>
+        <textarea id="import-text" rows="3" spellcheck="false" data-i18n-placeholder="import_text_placeholder"></textarea>
+        <span class="help" data-i18n="import_text_help">One otpauth:// URI per line.</span>
       </div>
       <div class="field" id="import-pw-row" hidden>
         <label for="import-pw" data-i18n="import_password">Password</label>

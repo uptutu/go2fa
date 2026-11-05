@@ -586,14 +586,23 @@ func init() {
 
 var cmdImport = &cobra.Command{
 	Use:   "import <file|->",
-	Short: "Import from .2fa / Aegis JSON / otpauth URI list",
+	Short: "Import from .2fa / Aegis JSON / otpauth URI list (file or pasted URI)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 {
-			return errors.New("usage: 2fa import <file|->")
+			return errors.New("usage: 2fa import <file|->|<otpauth-uri>")
 		}
-		format, buf, err := importexport.DetectFile(args[0])
-		if err != nil {
-			return err
+		var format importexport.Format
+		var buf []byte
+		var err error
+		if strings.HasPrefix(strings.TrimSpace(args[0]), "otpauth://") {
+			// Pasted URI text — no file needed.
+			buf = []byte(args[0])
+			format = importexport.Sniff(buf)
+		} else {
+			format, buf, err = importexport.DetectFile(args[0])
+			if err != nil {
+				return err
+			}
 		}
 		password, _ := cmd.Flags().GetString("password")
 		if format == importexport.Format2FA || format == importexport.FormatAegisEncrypted {

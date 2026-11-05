@@ -807,8 +807,9 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// handleImport accepts a multipart/form-data POST with a "file" field
-// (and optional "password" for encrypted formats) and merges its contents
+// handleImport accepts a multipart/form-data POST with either a "file"
+// field or a "text" field (pasted otpauth:// URI or URI list) plus an
+// optional "password" for encrypted formats, and merges its contents
 // into the vault. The format is auto-detected via importexport.Sniff, so
 // the UI does not have to pick a format up-front — just like `2fa import`
 // on the CLI. Returns the counts so the frontend can show a friendly
@@ -832,20 +833,32 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, http.StatusBadRequest, "import_bad_form", err.Error())
 		return
 	}
+	// Payload comes either from an uploaded file or from pasted text
+	// (a URI copied out of another app — no file needed).
 	file, _, err := r.FormFile("file")
+	var buf []byte
 	if err != nil {
-		s.writeAPIError(w, http.StatusBadRequest, "import_no_file", "missing file field")
-		return
-	}
-	defer file.Close()
-	buf, err := io.ReadAll(io.LimitReader(file, maxFile+1))
-	if err != nil {
-		s.internalErr(w, r, err)
-		return
-	}
-	if len(buf) > maxFile {
-		s.writeAPIError(w, http.StatusRequestEntityTooLarge, "import_too_large", "file too large (max 16 MiB)")
-		return
+		text := r.PostFormValue("text")
+		if strings.TrimSpace(text) == "" {
+			s.writeAPIError(w, http.StatusBadRequest, "import_no_file", "missing file or text field")
+			return
+		}
+		if len(text) > maxFile {
+			s.writeAPIError(w, http.StatusRequestEntityTooLarge, "import_too_large", "text too large (max 16 MiB)")
+			return
+		}
+		buf = []byte(text)
+	} else {
+		defer file.Close()
+		buf, err = io.ReadAll(io.LimitReader(file, maxFile+1))
+		if err != nil {
+			s.internalErr(w, r, err)
+			return
+		}
+		if len(buf) > maxFile {
+			s.writeAPIError(w, http.StatusRequestEntityTooLarge, "import_too_large", "file too large (max 16 MiB)")
+			return
+		}
 	}
 	password := r.FormValue("password")
 	format := importexport.Sniff(buf)

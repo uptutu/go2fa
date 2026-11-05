@@ -1348,6 +1348,37 @@ func TestAPIImportOtpauth(t *testing.T) {
 	}
 }
 
+// TestAPIImportPastedText confirms a pasted otpauth:// URI (no file
+// upload) imports the same way the file upload path does.
+func TestAPIImportPastedText(t *testing.T) {
+	srv := newTestServer(t)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("text", "otpauth://totp/tkit:Alex?issuer=tkit&secret=JBSWY3DPEHPK3PXP&issuer=Acme%20Corp&algorithm=SHA1&digits=6&period=30"); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+	res, err := http.Post("http://"+srv.Addr()+"/api/import", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d: %s", res.StatusCode, b)
+	}
+	var out struct {
+		Format string `json:"format"`
+		Added  int    `json:"added"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Format != "otpauth" || out.Added != 1 {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+}
+
 // TestAPIImportRejectsEncryptedWithoutPassword confirms the server refuses
 // a password-encrypted file when no password is supplied, so the UI can
 // surface the `import_password_required` error and ask again.

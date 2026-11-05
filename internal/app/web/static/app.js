@@ -94,9 +94,12 @@ const dict = {
     err_export_password: 'Password required for .2fa export',
     import: 'Import',
     import_title: 'Import',
-    import_body: 'Pick a .2fa / Aegis / otpauth:// file. Format is detected automatically — a password is asked only if the file is encrypted.',
+    import_body: 'Pick a .2fa / Aegis / otpauth:// file, or paste an otpauth:// URI. Format is detected automatically — a password is asked only if the file is encrypted.',
     import_file: 'File',
     import_file_help: 'Supported: .2fa (encrypted), Aegis JSON (plaintext or encrypted), otpauth:// URI list.',
+    import_text: 'Or paste text',
+    import_text_placeholder: 'otpauth://totp/Issuer:Account?secret=...',
+    import_text_help: 'One otpauth:// URI per line.',
     import_password: 'Password',
     import_password_help: 'Required because this file is encrypted.',
     import_detected: 'Detected: {format}',
@@ -109,7 +112,7 @@ const dict = {
     toast_import_groups_n: ', {n} new groups',
     toast_import_failed: 'Import failed: {err}',
     toast_import_bad_format: 'Unrecognized file format',
-    import_no_file: 'Pick a file to import',
+    import_no_file: 'Pick a file or paste text to import',
     delete_selected: 'Delete',
     delete_selected_title: 'Delete {n} secret | Delete {n} secrets',
     delete_selected_body: 'Delete {n} secret? This cannot be undone. | Delete {n} secrets? This cannot be undone.',
@@ -254,9 +257,12 @@ const dict = {
     err_export_password: '.2fa 导出需要密码',
     import: '导入',
     import_title: '导入',
-    import_body: '选择 .2fa / Aegis / otpauth:// 文件,格式自动识别 —— 仅加密文件会要求输入密码。',
+    import_body: '选择 .2fa / Aegis / otpauth:// 文件,或粘贴 otpauth:// URI,格式自动识别 —— 仅加密文件会要求输入密码。',
     import_file: '文件',
     import_file_help: '支持:.2fa (加密)、Aegis JSON (明文或加密)、otpauth:// URI 列表。',
+    import_text: '或粘贴文本',
+    import_text_placeholder: 'otpauth://totp/发行方:账号?secret=...',
+    import_text_help: '每行一个 otpauth:// URI。',
     import_password: '密码',
     import_password_help: '当前文件已加密,需要密码。',
     import_detected: '已识别:{format}',
@@ -269,7 +275,7 @@ const dict = {
     toast_import_groups_n: '新增 {n} 个分组',
     toast_import_failed: '导入失败:{err}',
     toast_import_bad_format: '无法识别的文件格式',
-    import_no_file: '请选择要导入的文件',
+    import_no_file: '请选择文件或粘贴文本',
     delete_selected: '删除',
     delete_selected_title: '删除 {n} 条 | 删除 {n} 条',
     delete_selected_body: '删除 {n} 条?此操作不可撤销。| 删除 {n} 条?此操作不可撤销。',
@@ -1478,17 +1484,24 @@ async function saveAdd() {
   } else {
     const issuer = $('#issuer').value.trim();
     const secret = $('#secret').value.trim();
-    if (!issuer) { err.textContent = t('err_name_required'); return; }
-    if (!secret) { err.textContent = t('err_secret_required'); return; }
-    body = {
-      issuer,
-      account: '',
-      secret,
-      algorithm: 'SHA1',
-      digits: 6,
-      period: 30,
-      group_id: 0,
-    };
+    // A pasted otpauth:// URI in either field means "import this URI".
+    const pasted = issuer.startsWith('otpauth://') ? issuer
+      : secret.startsWith('otpauth://') ? secret : '';
+    if (pasted) {
+      body = { uri: pasted, group_id: 0 };
+    } else {
+      if (!issuer) { err.textContent = t('err_name_required'); return; }
+      if (!secret) { err.textContent = t('err_secret_required'); return; }
+      body = {
+        issuer,
+        account: '',
+        secret,
+        algorithm: 'SHA1',
+        digits: 6,
+        period: 30,
+        group_id: 0,
+      };
+    }
   }
   const btn = $('#save-btn');
   btn.disabled = true;
@@ -1786,7 +1799,10 @@ const importGoBtn = $('#import-go');
 // server is still the source of truth — if our guess is wrong, /api/import
 // rejects the request with a precise error code.
 async function sniffFormat(file) {
-  const buf = new Uint8Array(await file.arrayBuffer());
+  return sniffBytes(new Uint8Array(await file.arrayBuffer()));
+}
+
+function sniffBytes(buf) {
   // 2FA\x01 magic = our own binary container (always encrypted).
   if (buf.length >= 4 && buf[0] === 0x32 && buf[1] === 0x46 && buf[2] === 0x41 && buf[3] === 0x01) {
     return { id: '2fa', label: '.2fa (encrypted)', needsPassword: true };
@@ -1812,6 +1828,7 @@ async function sniffFormat(file) {
 function resetImportState() {
   $('#import-err').textContent = '';
   $('#import-file').value = '';
+  $('#import-text').value = '';
   $('#import-pw').value = '';
   importPwRow.hidden = true;
   importDetected.hidden = true;
@@ -1833,6 +1850,15 @@ async function onImportFileChange() {
   if (fmt.needsPassword) setTimeout(() => $('#import-pw').focus(), 50);
 }
 
+// Pasted text is sniffed as you type so the format shows up before you
+// hit Import.
+function onImportTextInput() {
+  const text = $('#import-text').value.trim();
+  const fmt = sniffBytes(new TextEncoder().encode(text));
+  importDetected.textContent = t('import_detected', { format: fmt.label });
+  importDetected.hidden = !fmt.label;
+}
+
 function openImport() {
   resetImportState();
   showScrim(importScrim);
@@ -1844,15 +1870,18 @@ async function doImport() {
   err.textContent = '';
   const fileEl = /** @type {HTMLInputElement} */ ($('#import-file'));
   const file = fileEl.files && fileEl.files[0];
-  if (!file) { err.textContent = t('import_no_file'); return; }
-  const fmt = await sniffFormat(file);
+  const text = $('#import-text').value.trim();
+  if (!file && !text) { err.textContent = t('import_no_file'); return; }
+  const buf = file ? new Uint8Array(await file.arrayBuffer()) : new TextEncoder().encode(text);
+  const fmt = sniffBytes(buf);
   const pw = $('#import-pw').value;
   if (fmt.needsPassword && !pw) { err.textContent = t('import_password_required'); $('#import-pw').focus(); return; }
   const btn = $('#import-go');
   btn.disabled = true;
   try {
     const fd = new FormData();
-    fd.append('file', file);
+    if (file) fd.append('file', file);
+    else fd.append('text', text);
     if (pw) fd.append('password', pw);
     let res = await fetchWithActionPassword(
       '/api/import',
@@ -2016,6 +2045,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $$('#import-dialog [data-close]').forEach((b) => b.addEventListener('click', () => hideScrim(importScrim)));
   $('#import-go').addEventListener('click', doImport);
   $('#import-file').addEventListener('change', onImportFileChange);
+  $('#import-text').addEventListener('input', onImportTextInput);
 
   // Bulk delete (toolbar)
   $('#delete-selected-btn').addEventListener('click', deleteSelected);

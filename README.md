@@ -44,7 +44,9 @@ $ 2fa import backup.json
 - **Standard interop**
   - Export: `.2fa` (our encrypted JSON), Aegis JSON, `otpauth://` URI list.
   - Import: auto-detects format from file content (`.2fa` / Aegis /
-    encrypted Aegis / `otpauth://` URIs).
+    encrypted Aegis / `otpauth://` URIs). Pasted `otpauth://` text works
+    too — `2fa import "otpauth://..."`, the web Import dialog's text box,
+    or a URI pasted into the Add-secret form.
 - **Camera QR scan** in the Web UI via `getUserMedia` + jsQR
   (`make vendor-jsqr` fetches the vendored library).
 - **Clipboard auto-copy** — `pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip`,
@@ -141,7 +143,7 @@ and bulk-export selected secrets (checkbox multi-select).
 2fa group rename <id> <newname>
 2fa group delete <id>
 2fa export --format <.2fa|aegis|otpauth> --out <file|-> [--password <pw>]
-2fa import <file|-> [--password <pw>]
+2fa import <file|-> [--password <pw>]   Import a file, or a pasted otpauth:// URI
 2fa tui                                   Launch interactive TUI
 2fa web [--listen <addr>] [--token <t>]   Launch embedded web server
 2fa gui                                   Launch desktop GUI (native window)
