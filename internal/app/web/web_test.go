@@ -1052,6 +1052,56 @@ func TestAPIPreferences(t *testing.T) {
 	})
 }
 
+func TestIndexDesignTokens(t *testing.T) {
+	srv := newTestServer(t)
+	res, err := http.Get("http://" + srv.Addr() + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		"border-radius: 999px",
+		"blur(90px",
+		`class="blob`,
+		"text-transform: uppercase",
+	} {
+		if bytes.Contains(body, []byte(forbidden)) {
+			t.Errorf("index.html contains forbidden design token %q", forbidden)
+		}
+	}
+	for _, required := range []string{"--radius: 16px", "font-weight: 500"} {
+		if !bytes.Contains(body, []byte(required)) {
+			t.Errorf("index.html missing design token %q", required)
+		}
+	}
+
+	// The exclamation-mark copy lives in app.js, not index.html — check the
+	// served JS directly (exact dict entries; comments may still mention it).
+	res, err = http.Get("http://" + srv.Addr() + "/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	js, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"copied: 'Copied!'", "copied: '已复制!'"} {
+		if bytes.Contains(js, []byte(forbidden)) {
+			t.Errorf("app.js contains forbidden copy %q", forbidden)
+		}
+	}
+	for _, required := range []string{"copied: 'Copied'", "copied: '已复制'"} {
+		if !bytes.Contains(js, []byte(required)) {
+			t.Errorf("app.js missing copy %q", required)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
